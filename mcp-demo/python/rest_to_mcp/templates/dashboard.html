@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP Demo Dashboard</title>
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    <!-- Alpine.js - lightweight reactivity, no build step -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="/static/js/dashboard.js"></script>
+</head>
+<body>
+    <div class="container" x-data="dashboard">
+        <header>
+            <h1>MCP Protocol Demo</h1>
+            <p>REST-to-MCP adapter demonstrating protocol translation for LLM tool integration</p>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <nav class="tabs">
+            <button class="tab" :class="{ active: activeTab === 'demo' }" @click="activeTab = 'demo'">
+                Interactive Demo
+            </button>
+            <button class="tab" :class="{ active: activeTab === 'docs' }" @click="activeTab = 'docs'">
+                Documentation
+            </button>
+            <button class="tab" :class="{ active: activeTab === 'tests' }" @click="activeTab = 'tests'">
+                Test Runner
+            </button>
+        </nav>
+
+        <!-- Interactive Demo Panel -->
+        <div class="panel" :class="{ active: activeTab === 'demo' }">
+            <div class="grid-2">
+                <!-- Request Builder -->
+                <div class="card">
+                    <h2>MCP Request Builder</h2>
+
+                    <div class="form-group">
+                        <label for="method">Method</label>
+                        <select id="method" x-model="selectedMethod">
+                            <option value="tools/list">tools/list - Discover available tools</option>
+                            <option value="tools/call">tools/call - Execute a tool</option>
+                            <option value="initialize">initialize - Handshake (info only)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="params">Parameters (JSON)</label>
+                        <textarea id="params" x-model="requestParams" rows="8"></textarea>
+                    </div>
+
+                    <button class="btn btn-primary" @click="sendRequest" :disabled="isLoading">
+                        <span x-show="!isLoading">Send Request</span>
+                        <span x-show="isLoading"><span class="spinner"></span> Sending...</span>
+                    </button>
+
+                    <!-- Quick Examples -->
+                    <h3>Quick Examples</h3>
+                    <div class="grid-3">
+                        <template x-for="example in examples" :key="example.name">
+                            <div class="example-card" @click="loadExample(example)">
+                                <h4 x-text="example.name"></h4>
+                                <p x-text="example.description"></p>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Response Viewer -->
+                <div class="card">
+                    <h2>Response</h2>
+
+                    <!-- Request Preview -->
+                    <h3>Request Sent</h3>
+                    <pre><code x-text="formatJson(buildRequest())"></code></pre>
+
+                    <!-- Response -->
+                    <div class="response-section">
+                        <div class="response-header">
+                            <h3>Server Response</h3>
+                            <span class="response-time" x-show="responseTime">
+                                <span x-text="responseTime"></span>ms
+                            </span>
+                        </div>
+
+                        <!-- Loading state -->
+                        <template x-if="isLoading">
+                            <div style="text-align: center; padding: 2rem;">
+                                <span class="spinner" style="width: 24px; height: 24px;"></span>
+                            </div>
+                        </template>
+
+                        <!-- Error state -->
+                        <template x-if="error && !isLoading">
+                            <div>
+                                <span class="status status-error">Error</span>
+                                <pre style="margin-top: 0.75rem;"><code x-text="formatJson(error)"></code></pre>
+                            </div>
+                        </template>
+
+                        <!-- Success state -->
+                        <template x-if="response && !isLoading">
+                            <div>
+                                <span class="status status-success">Success</span>
+                                <pre style="margin-top: 0.75rem;"><code x-text="formatJson(response)"></code></pre>
+                            </div>
+                        </template>
+
+                        <!-- Empty state -->
+                        <template x-if="!response && !error && !isLoading">
+                            <p style="color: var(--text-secondary); font-size: 0.9rem;">
+                                Send a request to see the response here.
+                            </p>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Documentation Panel -->
+        <div class="panel" :class="{ active: activeTab === 'docs' }">
+            <div class="card">
+                <h2>Architecture Overview</h2>
+                <div class="architecture-flow">
+                    <div class="arch-box">
+                        <h4>LLM Agent</h4>
+                        <p>Claude, GPT, etc.</p>
+                    </div>
+                    <span class="arch-arrow">→</span>
+                    <div class="arch-box highlight">
+                        <h4>MCP Adapter</h4>
+                        <p>This service</p>
+                    </div>
+                    <span class="arch-arrow">→</span>
+                    <div class="arch-box">
+                        <h4>REST API</h4>
+                        <p>JSONPlaceholder</p>
+                    </div>
+                </div>
+                <p style="text-align: center; color: var(--text-secondary); margin-top: 1rem;">
+                    The adapter translates MCP tool calls into REST requests, enabling LLMs to interact with any REST API.
+                </p>
+            </div>
+
+            <div class="grid-2">
+                <div class="card">
+                    <h2>Core Concepts</h2>
+
+                    <div class="concept">
+                        <h3>What is MCP?</h3>
+                        <p>
+                            Model Context Protocol (MCP) is Anthropic's standard for LLM-to-tool communication.
+                            It defines how AI models discover and invoke external tools via JSON-RPC 2.0 messages.
+                        </p>
+                    </div>
+
+                    <div class="concept">
+                        <h3>Why Protocol Translation?</h3>
+                        <p>
+                            Most existing APIs are REST-based. Rather than rewriting them, this adapter
+                            dynamically exposes REST endpoints as MCP-compliant tools. The LLM sees a
+                            consistent interface regardless of the underlying API.
+                        </p>
+                    </div>
+
+                    <div class="concept">
+                        <h3>Tool Discovery</h3>
+                        <p>
+                            <code>tools/list</code> returns available tools with their names, descriptions,
+                            and parameter schemas. LLMs use this to understand what actions are possible.
+                        </p>
+                    </div>
+
+                    <div class="concept">
+                        <h3>Tool Execution</h3>
+                        <p>
+                            <code>tools/call</code> invokes a tool by name with arguments. The adapter
+                            maps this to the appropriate REST endpoint, makes the HTTP call, and returns
+                            the result in MCP format.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>Technical Decisions</h2>
+
+                    <div class="concept">
+                        <h3>FastAPI + Pydantic</h3>
+                        <p>
+                            ASGI server with automatic OpenAPI docs and runtime type validation.
+                            Matches the async patterns used in production MCP gateways.
+                        </p>
+                    </div>
+
+                    <div class="concept">
+                        <h3>Rust Parser (PyO3)</h3>
+                        <p>
+                            JSON-RPC parsing is a hot path in high-throughput gateways. The Rust parser
+                            provides ~2M ops/sec with zero GC pauses. PyO3 bindings make it callable from Python.
+                        </p>
+                    </div>
+
+                    <div class="concept">
+                        <h3>JSON-RPC 2.0 Wire Format</h3>
+                        <p>
+                            Every MCP message is a JSON-RPC envelope with <code>jsonrpc</code>, <code>id</code>,
+                            <code>method</code>, and optional <code>params</code>. Responses include
+                            <code>result</code> or <code>error</code>.
+                        </p>
+                    </div>
+
+                    <div class="concept">
+                        <h3>Stateless Adapter</h3>
+                        <p>
+                            No session state between requests. Each tool call is independent, making
+                            horizontal scaling trivial. Authentication would be handled per-request.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Example Message Flow</h2>
+                <div class="grid-2">
+                    <div>
+                        <h3>1. Client Request (tools/call)</h3>
+                        <pre><code>{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "get_post",
+    "arguments": { "id": 1 }
+  }
+}</code></pre>
+                    </div>
+                    <div>
+                        <h3>2. Adapter Action</h3>
+                        <pre><code>// Adapter maps tool call to REST:
+GET https://jsonplaceholder.typicode.com/posts/1
+
+// Headers, auth, etc. handled internally</code></pre>
+                    </div>
+                    <div>
+                        <h3>3. REST API Response</h3>
+                        <pre><code>{
+  "userId": 1,
+  "id": 1,
+  "title": "sunt aut facere...",
+  "body": "quia et suscipit..."
+}</code></pre>
+                    </div>
+                    <div>
+                        <h3>4. MCP Response to Client</h3>
+                        <pre><code>{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "content": [
+      { "type": "text", "text": "{...}" }
+    ]
+  }
+}</code></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Test Runner Panel -->
+        <div class="panel" :class="{ active: activeTab === 'tests' }">
+            <div class="card">
+                <h2>Test Suite Runner</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                    Run the full test suite with live streaming output. Tests cover models, adapter logic,
+                    and end-to-end integration with the JSONPlaceholder API.
+                </p>
+
+                <button class="btn btn-primary" @click="runTests" :disabled="testsRunning">
+                    <span x-show="!testsRunning">Run All Tests</span>
+                    <span x-show="testsRunning"><span class="spinner"></span> Running...</span>
+                </button>
+
+                <div style="margin-top: 1.5rem;">
+                    <div class="response-header">
+                        <h3>Output</h3>
+                        <div>
+                            <span class="status status-pending" x-show="testsRunning">Running</span>
+                            <span class="status status-success" x-show="!testsRunning && testOutput.includes('passed')">Complete</span>
+                        </div>
+                    </div>
+                    <div id="test-output" class="test-output" x-html="testOutput || 'Click \"Run All Tests\" to execute the test suite.'"></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Test Coverage</h2>
+                <div class="grid-3">
+                    <div class="example-card" style="cursor: default;">
+                        <h4>Unit Tests</h4>
+                        <p>Pydantic models, JSON-RPC serialization, tool schema generation</p>
+                    </div>
+                    <div class="example-card" style="cursor: default;">
+                        <h4>Adapter Tests</h4>
+                        <p>REST-to-MCP translation, error handling, parameter mapping</p>
+                    </div>
+                    <div class="example-card" style="cursor: default;">
+                        <h4>Integration Tests</h4>
+                        <p>End-to-end flows against live JSONPlaceholder API</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <footer style="margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: 0.85rem;">
+            <p>
+                MCP Demo &mdash; Portfolio project demonstrating REST-to-MCP protocol translation.
+                <a href="https://github.com" style="color: var(--accent);">View on GitHub</a>
+            </p>
+        </footer>
+    </div>
+</body>
+</html>

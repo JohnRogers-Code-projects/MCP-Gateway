@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from .adapter import RestToMcpAdapter, create_jsonplaceholder_adapter
+from .dashboard import get_static_files, router as dashboard_router
 from .models import ErrorCode, JsonRpcRequest, make_error_response
 
 # -----------------------------------------------------------------------------
@@ -53,6 +54,10 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Mount dashboard UI and static files
+app.include_router(dashboard_router)
+app.mount("/static", get_static_files(), name="static")
 
 
 @app.post("/mcp")
