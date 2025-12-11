@@ -11,7 +11,7 @@ In production, you'd likely disable this entirely or put it behind auth.
 """
 
 import asyncio
-import subprocess
+import os
 import sys
 from pathlib import Path
 
@@ -51,6 +51,7 @@ async def websocket_test_runner(websocket: WebSocket) -> None:
     Running arbitrary subprocess commands is dangerous - here we only run pytest.
     """
     await websocket.accept()
+    await websocket.send_text("WebSocket connected successfully")
 
     # Find the python directory (where tests live)
     python_dir = BASE_DIR.parent
@@ -58,12 +59,16 @@ async def websocket_test_runner(websocket: WebSocket) -> None:
     try:
         # Run pytest with unbuffered output for real-time streaming
         # -v for verbose, --tb=short for concise tracebacks
+        await websocket.send_text(f"Starting pytest in: {python_dir}")
+        await websocket.send_text(f"Python executable: {sys.executable}")
+        env = {**os.environ, "PYTHONUNBUFFERED": "1"}
         process = await asyncio.create_subprocess_exec(
             sys.executable, "-m", "pytest",
             "-v", "--tb=short", "-x",  # -x stops on first failure for faster feedback
             cwd=str(python_dir),
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,  # Merge stderr into stdout
+            stderr=asyncio.subprocess.STDOUT,
+            env=env,
         )
 
         # Stream output line by line
