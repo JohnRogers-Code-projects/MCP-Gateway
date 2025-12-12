@@ -23,6 +23,35 @@ document.addEventListener('alpine:init', () => {
         testsRunning: false,
         testSocket: null,
 
+        // Benchmark state
+        benchmarkPayload: 'simple',
+        benchmarkIterations: '10000',
+        benchmarkRunning: false,
+        benchmarkResults: [],
+        benchmarkStatus: '',
+        benchmarkComplete: false,
+        rustAvailable: true,
+        speedupFactor: null,
+        benchmarkSocket: null,
+        opsChart: null,
+        latencyChart: null,
+
+        // Playground state
+        playgroundInput: '',
+        playgroundRunning: false,
+        playgroundSteps: [],
+        playgroundScenario: null,
+        playgroundComplete: false,
+        playgroundError: null,
+        playgroundSummary: null,
+        playgroundSocket: null,
+        playgroundExamples: [
+            "Get all posts by user 1",
+            "Show post 5 with comments",
+            "Get user 2 profile",
+            "List available tools"
+        ],
+
         // Example requests for quick testing
         examples: [
             {
@@ -200,12 +229,284 @@ document.addEventListener('alpine:init', () => {
             return div.innerHTML;
         },
 
+        // Format number with commas
+        formatNumber(n) {
+            return new Intl.NumberFormat().format(Math.round(n));
+        },
+
+        // Truncate large results for display
+        truncateResult(result) {
+            const str = JSON.stringify(result, null, 2);
+            if (str.length > 500) {
+                return str.substring(0, 500) + '\n... (truncated)';
+            }
+            return str;
+        },
+
+        // ==================== BENCHMARK METHODS ====================
+
+        runBenchmark() {
+            if (this.benchmarkRunning) return;
+
+            this.benchmarkRunning = true;
+            this.benchmarkResults = [];
+            this.benchmarkStatus = 'Connecting...';
+            this.benchmarkComplete = false;
+            this.speedupFactor = null;
+
+            // Destroy existing charts
+            if (this.opsChart) {
+                this.opsChart.destroy();
+                this.opsChart = null;
+            }
+            if (this.latencyChart) {
+                this.latencyChart.destroy();
+                this.latencyChart = null;
+            }
+
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host}/ws/benchmarks`;
+
+            this.benchmarkSocket = new WebSocket(wsUrl);
+
+            this.benchmarkSocket.onopen = () => {
+                this.benchmarkSocket.send(JSON.stringify({
+                    payload: this.benchmarkPayload,
+                    iterations: parseInt(this.benchmarkIterations)
+                }));
+            };
+
+            this.benchmarkSocket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+
+                switch (data.type) {
+                    case 'status':
+                        this.benchmarkStatus = data.message;
+                        this.rustAvailable = data.rust_available;
+                        break;
+
+                    case 'progress':
+                        this.benchmarkStatus = data.message;
+                        break;
+
+                    case 'result':
+                        this.benchmarkResults.push(data.result);
+                        break;
+
+                    case 'complete':
+                        this.benchmarkComplete = true;
+                        this.benchmarkRunning = false;
+                        this.benchmarkStatus = '';
+                        this.speedupFactor = data.speedup;
+                        this.$nextTick(() => this.renderBenchmarkCharts());
+                        break;
+
+                    case 'error':
+                        this.benchmarkStatus = `Error: ${data.message}`;
+                        this.benchmarkRunning = false;
+                        break;
+                }
+            };
+
+            this.benchmarkSocket.onerror = () => {
+                this.benchmarkStatus = 'WebSocket connection failed';
+                this.benchmarkRunning = false;
+            };
+
+            this.benchmarkSocket.onclose = () => {
+                if (this.benchmarkRunning) {
+                    this.benchmarkRunning = false;
+                }
+            };
+        },
+
+        renderBenchmarkCharts() {
+            if (this.benchmarkResults.length === 0) return;
+
+            const colors = {
+                python: '#f85149',
+                rust: '#3fb950'
+            };
+
+            // Ops/sec bar chart
+            const opsCtx = document.getElementById('opsChart');
+            if (opsCtx) {
+                this.opsChart = new Chart(opsCtx.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: this.benchmarkResults.map(r => r.parser.charAt(0).toUpperCase() + r.parser.slice(1)),
+                        datasets: [{
+                            label: 'Operations/sec',
+                            data: this.benchmarkResults.map(r => r.ops_per_sec),
+                            backgroundColor: this.benchmarkResults.map(r => colors[r.parser] || '#888'),
+                            borderRadius: 4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                callbacks: {
+                                    label: (ctx) => `${this.formatNumber(ctx.raw)} ops/sec`
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: {
+                                    callback: (value) => this.formatNumber(value)
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Latency distribution chart
+            const latencyCtx = document.getElementById('latencyChart');
+            if (latencyCtx) {
+                this.latencyChart = new Chart(latencyCtx.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: ['P50', 'P95', 'P99'],
+                        datasets: this.benchmarkResults.map(r => ({
+                            label: r.parser.charAt(0).toUpperCase() + r.parser.slice(1),
+                            data: [r.p50_ns, r.p95_ns, r.p99_ns],
+                            backgroundColor: colors[r.parser] || '#888',
+                            borderRadius: 4
+                        }))
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: { position: 'top' },
+                            tooltip: {
+                                callbacks: {
+                                    label: (ctx) => `${ctx.dataset.label}: ${this.formatNumber(ctx.raw)} ns`
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: {
+                                    callback: (value) => this.formatNumber(value)
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        },
+
+        // ==================== PLAYGROUND METHODS ====================
+
+        runPlayground() {
+            if (this.playgroundRunning || !this.playgroundInput.trim()) return;
+
+            this.playgroundRunning = true;
+            this.playgroundSteps = [];
+            this.playgroundScenario = null;
+            this.playgroundComplete = false;
+            this.playgroundError = null;
+            this.playgroundSummary = null;
+
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host}/ws/playground`;
+
+            this.playgroundSocket = new WebSocket(wsUrl);
+
+            this.playgroundSocket.onopen = () => {
+                this.playgroundSocket.send(JSON.stringify({
+                    input: this.playgroundInput
+                }));
+            };
+
+            this.playgroundSocket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+
+                switch (data.type) {
+                    case 'scenario_matched':
+                        this.playgroundScenario = data.name;
+                        // Pre-populate steps as pending
+                        for (let i = 0; i < data.steps_count; i++) {
+                            this.playgroundSteps.push({
+                                tool: '...',
+                                label: 'Pending...',
+                                active: false,
+                                complete: false,
+                                args: null,
+                                result: null
+                            });
+                        }
+                        break;
+
+                    case 'step_start':
+                        if (this.playgroundSteps[data.index]) {
+                            this.playgroundSteps[data.index] = {
+                                ...this.playgroundSteps[data.index],
+                                tool: data.tool,
+                                label: data.label,
+                                active: true,
+                                complete: false
+                            };
+                        }
+                        break;
+
+                    case 'step_result':
+                        if (this.playgroundSteps[data.index]) {
+                            this.playgroundSteps[data.index] = {
+                                ...this.playgroundSteps[data.index],
+                                args: data.args,
+                                result: data.result,
+                                active: false,
+                                complete: true
+                            };
+                        }
+                        break;
+
+                    case 'complete':
+                        this.playgroundComplete = true;
+                        this.playgroundRunning = false;
+                        this.playgroundSummary = data.summary;
+                        break;
+
+                    case 'error':
+                        this.playgroundError = data.message;
+                        this.playgroundRunning = false;
+                        break;
+                }
+            };
+
+            this.playgroundSocket.onerror = () => {
+                this.playgroundError = 'WebSocket connection failed';
+                this.playgroundRunning = false;
+            };
+
+            this.playgroundSocket.onclose = () => {
+                if (this.playgroundRunning) {
+                    this.playgroundRunning = false;
+                }
+            };
+        },
+
+        clearPlayground() {
+            this.playgroundInput = '';
+            this.playgroundSteps = [];
+            this.playgroundScenario = null;
+            this.playgroundComplete = false;
+            this.playgroundError = null;
+            this.playgroundSummary = null;
+        },
+
         // Cleanup on page unload
         init() {
             window.addEventListener('beforeunload', () => {
-                if (this.testSocket) {
-                    this.testSocket.close();
-                }
+                if (this.testSocket) this.testSocket.close();
+                if (this.benchmarkSocket) this.benchmarkSocket.close();
+                if (this.playgroundSocket) this.playgroundSocket.close();
             });
         }
     }));

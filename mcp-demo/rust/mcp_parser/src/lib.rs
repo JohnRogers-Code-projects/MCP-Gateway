@@ -277,12 +277,12 @@ impl PyJsonRpcRequest {
             match &self.inner.params {
                 Some(map) => {
                     // Convert to Python dict
-                    let dict = pyo3::types::PyDict::new(py);
+                    let dict = pyo3::types::PyDict::new_bound(py);
                     for (k, v) in map {
                         let py_value = json_value_to_py(py, v);
                         dict.set_item(k, py_value).unwrap();
                     }
-                    dict.into_py(py)
+                    dict.into()
                 }
                 None => py.None(),
             }
@@ -361,11 +361,11 @@ fn json_value_to_py(py: Python<'_>, value: &Value) -> PyObject {
             list.into_py(py)
         }
         Value::Object(map) => {
-            let dict = pyo3::types::PyDict::new(py);
+            let dict = pyo3::types::PyDict::new_bound(py);
             for (k, v) in map {
                 dict.set_item(k, json_value_to_py(py, v)).unwrap();
             }
-            dict.into_py(py)
+            dict.into()
         }
     }
 }
@@ -396,9 +396,9 @@ fn is_valid(input: &str) -> bool {
 
 /// Batch parse multiple requests (more efficient than parsing one at a time)
 #[pyfunction]
-fn parse_requests_batch(inputs: Vec<&str>) -> PyResult<Vec<PyJsonRpcRequest>> {
+fn parse_requests_batch(inputs: Vec<String>) -> PyResult<Vec<PyJsonRpcRequest>> {
     inputs
-        .into_iter()
+        .iter()
         .map(|input| {
             let inner = parse_request_impl(input)?;
             Ok(PyJsonRpcRequest { inner })
@@ -536,7 +536,32 @@ mod tests {
     fn test_null_id() {
         let input = r#"{"jsonrpc":"2.0","id":null,"method":"notify"}"#;
         let req = parse_request_impl(input).unwrap();
-        
+
         assert_eq!(req.id, RequestId::Null);
+    }
+
+    #[test]
+    fn test_invalid_params_type() {
+        // Params must be object or null, not array
+        let input = r#"{"jsonrpc":"2.0","id":1,"method":"test","params":[1,2,3]}"#;
+        let err = parse_request_impl(input).unwrap_err();
+
+        assert!(matches!(err, ParseError::InvalidFieldType("params", _)));
+    }
+
+    #[test]
+    fn test_parse_response_missing_result() {
+        let input = r#"{"jsonrpc":"2.0","id":1}"#;
+        let err = parse_response_impl(input).unwrap_err();
+
+        assert!(matches!(err, ParseError::MissingField("result")));
+    }
+
+    #[test]
+    fn test_missing_jsonrpc_field() {
+        let input = r#"{"id":1,"method":"test"}"#;
+        let err = parse_request_impl(input).unwrap_err();
+
+        assert!(matches!(err, ParseError::MissingField("jsonrpc")));
     }
 }

@@ -31,7 +31,7 @@ LLMs speak **MCP** (Model Context Protocol). Most APIs speak **REST**. This adap
 
 ```bash
 # Clone and setup
-git clone https://github.com/yourusername/MCP-Demo.git
+git clone https://github.com/RogersJohn/MCP-Demo.git
 cd MCP-Demo/mcp-demo/python
 
 # Install
@@ -52,6 +52,8 @@ The dashboard includes:
 | Tab | What It Does |
 |-----|--------------|
 | **Interactive Demo** | Send MCP requests, see responses in real-time |
+| **Agent Playground** | Natural language queries triggering multi-tool orchestration |
+| **Benchmarks** | Live Python vs Rust parser performance comparison |
 | **Documentation** | Core concepts, architecture, message flow examples |
 | **Test Runner** | Execute the full test suite with streaming output |
 

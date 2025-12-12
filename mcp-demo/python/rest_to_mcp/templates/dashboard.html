@@ -7,19 +7,27 @@
     <link rel="stylesheet" href="/static/css/dashboard.css">
     <!-- Alpine.js - lightweight reactivity, no build step -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- Chart.js for benchmark visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="/static/js/dashboard.js"></script>
 </head>
 <body>
     <div class="container" x-data="dashboard">
         <header>
             <h1>MCP Protocol Demo</h1>
-            <p>REST-to-MCP adapter demonstrating protocol translation for LLM tool integration</p>
+            <p><span data-tooltip="Converts traditional web API calls into a format that AI assistants can understand and use">REST-to-MCP adapter</span> demonstrating <span data-tooltip="Taking requests in one format and converting them to another format that a different system expects">protocol translation</span> for <span data-tooltip="Giving AI models like Claude or GPT the ability to take actions, like fetching data or creating records">LLM tool integration</span></p>
         </header>
 
         <!-- Navigation Tabs -->
         <nav class="tabs">
             <button class="tab" :class="{ active: activeTab === 'demo' }" @click="activeTab = 'demo'">
                 Interactive Demo
+            </button>
+            <button class="tab" :class="{ active: activeTab === 'playground' }" @click="activeTab = 'playground'">
+                Agent Playground
+            </button>
+            <button class="tab" :class="{ active: activeTab === 'benchmarks' }" @click="activeTab = 'benchmarks'">
+                Benchmarks
             </button>
             <button class="tab" :class="{ active: activeTab === 'docs' }" @click="activeTab = 'docs'">
                 Documentation
@@ -37,7 +45,7 @@
                     <h2>MCP Request Builder</h2>
 
                     <div class="form-group">
-                        <label for="method">Method</label>
+                        <label for="method"><span data-tooltip="The action you want the server to perform. Like choosing a command from a menu.">Method</span></label>
                         <select id="method" x-model="selectedMethod">
                             <option value="tools/list">tools/list - Discover available tools</option>
                             <option value="tools/call">tools/call - Execute a tool</option>
@@ -46,7 +54,7 @@
                     </div>
 
                     <div class="form-group">
-                        <label for="params">Parameters (JSON)</label>
+                        <label for="params"><span data-tooltip="Extra information the method needs to do its job. For example, which tool to run and what data to give it.">Parameters (JSON)</span></label>
                         <textarea id="params" x-model="requestParams" rows="8"></textarea>
                     </div>
 
@@ -72,14 +80,14 @@
                     <h2>Response</h2>
 
                     <!-- Request Preview -->
-                    <h3>Request Sent</h3>
+                    <h3><span data-tooltip="This is the exact message being sent to the server. It follows JSON-RPC format: a standard way for programs to talk to each other.">Request Sent</span></h3>
                     <pre><code x-text="formatJson(buildRequest())"></code></pre>
 
                     <!-- Response -->
                     <div class="response-section">
                         <div class="response-header">
                             <h3>Server Response</h3>
-                            <span class="response-time" x-show="responseTime">
+                            <span class="response-time" x-show="responseTime" data-tooltip="Round-trip time: how long from sending the request until receiving the response. Lower is faster.">
                                 <span x-text="responseTime"></span>ms
                             </span>
                         </div>
@@ -312,10 +320,222 @@ GET https://jsonplaceholder.typicode.com/posts/1
             </div>
         </div>
 
+        <!-- Benchmarks Panel -->
+        <div class="panel" :class="{ active: activeTab === 'benchmarks' }">
+            <div class="card">
+                <h2>Parser Performance Comparison</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                    JSON-RPC parsing is a hot path in MCP gateways handling thousands of requests per second.
+                    This benchmark compares Python (json.loads + Pydantic validation) against a Rust parser
+                    (serde_json with PyO3 bindings). Rust eliminates GC pauses and provides predictable latency,
+                    making it ideal for high-throughput message parsing.
+                </p>
+
+                <div class="benchmark-controls">
+                    <div class="form-group">
+                        <label><span data-tooltip="The size and complexity of the test message. Larger messages take longer to parse, showing how performance scales.">Payload Type</span></label>
+                        <select x-model="benchmarkPayload">
+                            <option value="simple">Simple Request (44 bytes)</option>
+                            <option value="complex">Complex Request (200+ bytes)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label><span data-tooltip="How many times to run the test. More iterations give more accurate averages but take longer.">Iterations</span></label>
+                        <select x-model="benchmarkIterations">
+                            <option value="1000">1,000 (quick)</option>
+                            <option value="10000">10,000 (standard)</option>
+                            <option value="100000">100,000 (thorough)</option>
+                        </select>
+                    </div>
+
+                    <button class="btn btn-primary" @click="runBenchmark" :disabled="benchmarkRunning">
+                        <span x-show="!benchmarkRunning">Run Benchmark</span>
+                        <span x-show="benchmarkRunning"><span class="spinner"></span> Running...</span>
+                    </button>
+                </div>
+
+                <!-- Status message -->
+                <div x-show="benchmarkStatus" class="benchmark-status" x-text="benchmarkStatus"></div>
+
+                <!-- Rust not available warning -->
+                <div x-show="benchmarkComplete && !rustAvailable" class="rust-warning">
+                    <strong>Rust parser not available.</strong>
+                    <p>Install Rust and run: <code>cd mcp-demo/rust/mcp_parser && maturin develop --release</code></p>
+                </div>
+
+                <!-- Results -->
+                <div x-show="benchmarkResults.length > 0" class="benchmark-results">
+                    <div class="grid-2">
+                        <div>
+                            <h3><span data-tooltip="How many messages can be parsed per second. Higher is better. This measures raw throughput.">Operations per Second</span></h3>
+                            <canvas id="opsChart"></canvas>
+                        </div>
+                        <div>
+                            <h3><span data-tooltip="How long each parse takes in nanoseconds. P50 is the median, P95/P99 show worst-case times. Lower and more consistent is better.">Latency Distribution (ns)</span></h3>
+                            <canvas id="latencyChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Speedup callout -->
+                    <div x-show="speedupFactor" class="speedup-callout">
+                        <span class="speedup-value" x-text="speedupFactor + 'x'"></span>
+                        <span>faster with Rust parser</span>
+                    </div>
+
+                    <!-- Raw numbers table -->
+                    <h3 style="margin-top: 2rem;">Raw Results</h3>
+                    <table class="benchmark-table">
+                        <thead>
+                            <tr>
+                                <th>Parser</th>
+                                <th><span data-tooltip="Operations per second - how many parses completed in one second">Ops/sec</span></th>
+                                <th><span data-tooltip="Average time per operation in nanoseconds (billionths of a second)">Mean (ns)</span></th>
+                                <th><span data-tooltip="50th percentile - half of operations were faster than this">P50 (ns)</span></th>
+                                <th><span data-tooltip="95th percentile - 95% of operations were faster than this">P95 (ns)</span></th>
+                                <th><span data-tooltip="99th percentile - only 1% of operations were slower than this (worst case)">P99 (ns)</span></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="result in benchmarkResults" :key="result.parser">
+                                <tr>
+                                    <td x-text="result.parser"></td>
+                                    <td x-text="formatNumber(result.ops_per_sec)"></td>
+                                    <td x-text="formatNumber(result.mean_ns)"></td>
+                                    <td x-text="formatNumber(result.p50_ns)"></td>
+                                    <td x-text="formatNumber(result.p95_ns)"></td>
+                                    <td x-text="formatNumber(result.p99_ns)"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Methodology explanation -->
+            <div class="card">
+                <h2>Methodology</h2>
+                <div class="grid-2">
+                    <div class="concept">
+                        <h3>Python Implementation</h3>
+                        <p>
+                            <code>json.loads()</code> for parsing + Pydantic model instantiation for validation.
+                            This is what the current adapter uses. Standard library + popular validation.
+                        </p>
+                    </div>
+                    <div class="concept">
+                        <h3>Rust Implementation</h3>
+                        <p>
+                            <code>serde_json</code> for parsing + custom validation logic.
+                            Called via PyO3 bindings with minimal Python overhead. Zero-copy where possible.
+                        </p>
+                    </div>
+                </div>
+                <div class="concept" style="margin-top: 1rem;">
+                    <h3>Fair Comparison</h3>
+                    <p>
+                        Both implementations parse identical payloads. Timing uses <code>time.perf_counter_ns()</code>
+                        with warm-up iterations discarded. Statistics include mean, standard deviation, and percentiles.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Agent Playground Panel -->
+        <div class="panel" :class="{ active: activeTab === 'playground' }">
+            <div class="card">
+                <h2>Agent Playground</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                    Type a natural language query and watch <span data-tooltip="Actions the AI can take, like 'get_user' or 'create_post'. Each tool maps to a specific API call.">MCP tools</span> execute step-by-step.
+                    No LLM required &mdash; this demonstrates how an <span data-tooltip="An AI system that breaks down a task into steps and calls the right tools in sequence to accomplish it">agent</span> would <span data-tooltip="Choosing which tools to call and in what order, passing data between them to complete a task">orchestrate</span> multiple tools.
+                </p>
+
+                <div class="form-group">
+                    <label>Your Query</label>
+                    <input
+                        type="text"
+                        x-model="playgroundInput"
+                        @keydown.enter="runPlayground"
+                        placeholder="e.g., Get all posts by user 1 and their comments"
+                        class="playground-input"
+                    >
+                </div>
+
+                <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+                    <button class="btn btn-primary" @click="runPlayground" :disabled="playgroundRunning || !playgroundInput.trim()">
+                        <span x-show="!playgroundRunning">Execute</span>
+                        <span x-show="playgroundRunning"><span class="spinner"></span> Running...</span>
+                    </button>
+                    <button class="btn btn-secondary" @click="clearPlayground">Clear</button>
+                </div>
+
+                <!-- Example queries -->
+                <div class="example-queries">
+                    <span style="color: var(--text-secondary); font-size: 0.85rem;">Try:</span>
+                    <template x-for="example in playgroundExamples" :key="example">
+                        <button class="example-pill" @click="playgroundInput = example">
+                            <span x-text="example"></span>
+                        </button>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Execution trace -->
+            <div class="card" x-show="playgroundSteps.length > 0 || playgroundError">
+                <h2><span data-tooltip="A step-by-step log showing each tool called, what data was sent, and what came back. This is exactly what an AI agent would do behind the scenes.">Execution Trace</span></h2>
+
+                <!-- Error state -->
+                <div x-show="playgroundError" class="playground-error">
+                    <span class="status status-error">Error</span>
+                    <p x-text="playgroundError"></p>
+                </div>
+
+                <!-- Scenario info -->
+                <div x-show="playgroundScenario" class="scenario-header">
+                    <span class="status status-success" x-show="playgroundComplete">Complete</span>
+                    <span class="status status-pending" x-show="!playgroundComplete && playgroundRunning">Running</span>
+                    <span x-text="playgroundScenario"></span>
+                </div>
+
+                <!-- Step-by-step trace -->
+                <div class="execution-steps">
+                    <template x-for="(step, index) in playgroundSteps" :key="index">
+                        <div class="execution-step" :class="{ 'step-complete': step.complete, 'step-active': step.active }">
+                            <div class="step-header">
+                                <span class="step-number" x-text="index + 1"></span>
+                                <span class="step-tool" x-text="step.tool"></span>
+                                <span class="step-label" x-text="step.label"></span>
+                                <span class="spinner" x-show="step.active && !step.complete" style="width: 16px; height: 16px;"></span>
+                                <span class="step-check" x-show="step.complete">&#10003;</span>
+                            </div>
+
+                            <!-- Tool call details (expandable) -->
+                            <div class="step-details" x-show="step.args || step.result">
+                                <div x-show="step.args" class="step-section">
+                                    <strong><span data-tooltip="The input data sent to this tool - like telling it which user ID to look up">Arguments:</span></strong>
+                                    <pre><code x-text="formatJson(step.args)"></code></pre>
+                                </div>
+                                <div x-show="step.result" class="step-section">
+                                    <strong><span data-tooltip="What the tool returned - the actual data fetched from the API">Result:</span></strong>
+                                    <pre><code x-text="truncateResult(step.result)"></code></pre>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Final summary -->
+                <div x-show="playgroundSummary" class="playground-summary">
+                    <h3>Summary</h3>
+                    <p x-text="playgroundSummary"></p>
+                </div>
+            </div>
+        </div>
+
         <footer style="margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: 0.85rem;">
             <p>
                 MCP Demo &mdash; Portfolio project demonstrating REST-to-MCP protocol translation.
-                <a href="https://github.com" style="color: var(--accent);">View on GitHub</a>
+                <a href="https://github.com/RogersJohn/MCP-Demo" style="color: var(--accent);">View on GitHub</a>
             </p>
         </footer>
     </div>

@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from .adapter import RestToMcpAdapter, create_jsonplaceholder_adapter
-from .dashboard import get_static_files, router as dashboard_router
+from .dashboard import get_static_files, router as dashboard_router, set_adapter
 from .models import ErrorCode, JsonRpcRequest, make_error_response
 
 # -----------------------------------------------------------------------------
@@ -36,6 +36,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage adapter lifecycle - startup and shutdown."""
     global adapter
     adapter = create_jsonplaceholder_adapter()
+    # Share adapter with dashboard for playground feature
+    set_adapter(adapter)
     yield
     if adapter:
         await adapter.close()
