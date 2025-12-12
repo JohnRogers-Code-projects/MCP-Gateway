@@ -2,6 +2,8 @@
 
 **REST-to-MCP adapter with high-performance Rust parsing** — enabling LLMs to interact with any REST API through Anthropic's Model Context Protocol.
 
+> **Note:** This is a portfolio project demonstrating understanding of MCP protocol concepts. It is not affiliated with or derived from any proprietary implementation.
+
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
