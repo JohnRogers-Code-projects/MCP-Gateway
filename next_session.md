@@ -10,6 +10,7 @@ This is a **portfolio demonstration** created to show understanding of MCP proto
 - Tool discovery and execution patterns
 - Performance optimization with Rust
 - Multi-tool agent orchestration
+- **Multi-API composition** (NEW)
 
 All code is original, uses only public documentation about MCP, and targets freely available public APIs.
 
@@ -18,77 +19,58 @@ All code is original, uses only public documentation about MCP, and targets free
 ## Current State (2024-12-12)
 
 Project is **feature-complete** with:
-- REST-to-MCP adapter translating JSONPlaceholder API
+- REST-to-MCP adapter translating **multiple APIs** (JSONPlaceholder + Open-Meteo)
 - Rust JSON-RPC parser with PyO3 bindings
 - Interactive dashboard with 5 tabs
 - Tooltips explaining technical concepts in plain English
-- 49 Python tests + 14 Rust tests passing
+- **59 Python tests** + 14 Rust tests passing
+- **Cross-API tool composition** with step-to-step data flow
 
 ---
 
-## Next Feature: Multi-API Tool Composition
+## Completed: Multi-API Tool Composition (2024-12-12)
 
-### Why This Matters
+### What Was Implemented
 
-IBM's ContextForge value proposition includes "rapidly bring a client's **vast portfolio** of existing APIs into the AI agent ecosystem." Currently this demo only shows one API. Adding a second API demonstrates:
+1. **Multi-API support in adapter.py:**
+   - Added `base_url` field to `RestEndpoint` for endpoint-specific API bases
+   - Added `OPEN_METEO_ENDPOINTS` with `get_weather` and `get_forecast` tools
+   - Created `create_multi_api_adapter()` factory combining both APIs
+   - Updated server to use multi-API adapter (now 10 tools total)
 
-1. The gateway pattern isn't tied to a single backend
-2. Cross-system data flow (enterprise integration core skill)
-3. Agent orchestration across multiple services
+2. **Cross-step data flow in playground.py:**
+   - Added `extract_nested_value()` for dot-notation path extraction
+   - Enhanced `substitute_args()` to support `$result.N.path.to.value` syntax
+   - Added `user_weather` scenario: "Check weather for user 3"
+     - Step 1: `get_user(3)` → extracts `address.geo.lat/lng`
+     - Step 2: `get_weather(lat, lng)` → uses coordinates from step 1
+   - Added weather condition parsing (WMO codes → human descriptions)
 
-### Implementation Plan
+3. **New tests added:**
+   - `TestMultiApiSupport`: 5 tests for multi-API configuration
+   - `TestPlaygroundDataFlow`: 5 tests for cross-step data extraction
 
-**Add Open-Meteo weather API** (free, no API key required)
+### Example Query
 
-1. **Add weather tools to `adapter.py`:**
-   - `get_weather` - Get current weather for coordinates
-   - `get_forecast` - Get 7-day forecast for coordinates
-
-2. **Add cross-API scenario to `playground.py`:**
-   ```
-   Query: "Get the location of user 3 and check the weather there"
-
-   Step 1: get_user (JSONPlaceholder) → returns user with address/geo
-   Step 2: get_weather (Open-Meteo) → uses lat/lng from user
-   Step 3: Summary combining both results
-   ```
-
-3. **No UI changes needed** - playground already handles multi-step traces
-
-### API Details
-
-Open-Meteo endpoint:
 ```
-GET https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lng}&current_weather=true
-```
+Query: "Check weather for user 3"
 
-JSONPlaceholder users include geo coordinates:
-```json
-{
-  "id": 3,
-  "name": "Clementine Bauch",
-  "address": {
-    "geo": { "lat": "-68.6102", "lng": "-47.0653" }
-  }
-}
+Step 1: get_user (JSONPlaceholder)
+  → Returns user with address.geo: {lat: "-68.6102", lng: "-47.0653"}
+
+Step 2: get_weather (Open-Meteo)
+  → Uses coordinates from step 1
+  → Returns: {temperature: -5.2, weathercode: 71}
+
+Summary: "Weather for Clementine Bauch: -5.2°C, Slight snow"
 ```
 
-### Estimated Scope
+### Why This Matters for IBM
 
-~1-2 hours:
-- Add `RestEndpoint` definitions for Open-Meteo (~15 min)
-- Add scenario pattern matching (~15 min)
-- Test and verify (~30 min)
-
----
-
-## Files to Modify
-
-| File | Change |
-|------|--------|
-| `adapter.py` | Add Open-Meteo endpoints to `JSONPLACEHOLDER_ENDPOINTS` (rename to `DEFAULT_ENDPOINTS`) |
-| `playground.py` | Add cross-API scenario with geo lookup |
-| `mcp-demo/README.md` | Update to mention multi-API capability |
+- Demonstrates the gateway isn't tied to one backend
+- Shows cross-system data flow (enterprise integration pattern)
+- Mirrors real ContextForge use: "connect Instana + MQ + legacy CRM"
+- Directly addresses "vast portfolio" selling point
 
 ---
 
@@ -100,17 +82,26 @@ cd mcp-demo/python
 uvicorn rest_to_mcp.server:app --reload
 ```
 
-Open http://localhost:8000 - Rust parser should show as available in Benchmarks tab.
+Open http://localhost:8000 - Try "Check weather for user 3" in the Playground tab.
 
 ---
 
 ## Test Commands
 
 ```bash
-# Python tests
+# Python tests (59 tests)
 cd mcp-demo/python && pytest -v
 
-# Rust tests
+# Rust tests (14 tests)
 cd mcp-demo/rust/mcp_parser
 PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo test
 ```
+
+---
+
+## Potential Future Enhancements
+
+1. **Add more APIs**: GitHub API, NASA API, etc.
+2. **Conditional branching**: Different steps based on previous results
+3. **Error handling UI**: Show failed API calls gracefully
+4. **Rate limiting**: Demonstrate production-ready patterns

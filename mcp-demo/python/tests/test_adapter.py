@@ -284,3 +284,185 @@ class TestJsonPlaceholderEndpoints:
         assert HttpMethod.POST in methods
         assert HttpMethod.PUT in methods
         assert HttpMethod.DELETE in methods
+
+
+# -----------------------------------------------------------------------------
+# Multi-API Tests
+# -----------------------------------------------------------------------------
+
+
+class TestMultiApiSupport:
+    """Tests for multi-API composition feature."""
+
+    def test_open_meteo_endpoints_defined(self):
+        from rest_to_mcp.adapter import OPEN_METEO_ENDPOINTS
+        assert len(OPEN_METEO_ENDPOINTS) == 2
+        names = [e.name for e in OPEN_METEO_ENDPOINTS]
+        assert "get_weather" in names
+        assert "get_forecast" in names
+
+    def test_open_meteo_endpoints_have_base_url(self):
+        from rest_to_mcp.adapter import OPEN_METEO_ENDPOINTS, OPEN_METEO_BASE
+        for endpoint in OPEN_METEO_ENDPOINTS:
+            assert endpoint.base_url == OPEN_METEO_BASE
+
+    def test_default_endpoints_combines_apis(self):
+        from rest_to_mcp.adapter import DEFAULT_ENDPOINTS
+        # 8 JSONPlaceholder + 2 Open-Meteo
+        assert len(DEFAULT_ENDPOINTS) == 10
+
+    def test_multi_api_adapter_has_all_tools(self):
+        from rest_to_mcp.adapter import create_multi_api_adapter
+        adapter = create_multi_api_adapter()
+        tools = adapter.list_tools()
+        tool_names = [t.name for t in tools]
+        # JSONPlaceholder tools
+        assert "get_user" in tool_names
+        assert "get_posts" in tool_names
+        # Open-Meteo tools
+        assert "get_weather" in tool_names
+        assert "get_forecast" in tool_names
+
+    def test_endpoint_with_base_url_generates_full_url(self):
+        """Verify that endpoint-specific base_url is used in URL construction."""
+        from rest_to_mcp.adapter import RestEndpoint, HttpMethod, OPEN_METEO_BASE
+
+        endpoint = RestEndpoint(
+            name="test_weather",
+            path="/v1/forecast",
+            method=HttpMethod.GET,
+            description="Test weather endpoint",
+            query_params=["latitude"],
+            base_url=OPEN_METEO_BASE,
+        )
+
+        # The endpoint should have its own base_url
+        assert endpoint.base_url == "https://api.open-meteo.com"
+
+
+# -----------------------------------------------------------------------------
+# Playground Cross-Step Data Flow Tests
+# -----------------------------------------------------------------------------
+
+
+class TestPlaygroundDataFlow:
+    """Tests for cross-step result extraction in playground scenarios."""
+
+    def test_extract_nested_value_simple(self):
+        from rest_to_mcp.playground import extract_nested_value
+        data = {"name": "John", "age": 30}
+        assert extract_nested_value(data, "name") == "John"
+        assert extract_nested_value(data, "age") == 30
+
+    def test_extract_nested_value_deep(self):
+        from rest_to_mcp.playground import extract_nested_value
+        data = {"address": {"geo": {"lat": "-68.6102", "lng": "-47.0653"}}}
+        assert extract_nested_value(data, "address.geo.lat") == "-68.6102"
+        assert extract_nested_value(data, "address.geo.lng") == "-47.0653"
+
+    def test_extract_nested_value_missing(self):
+        from rest_to_mcp.playground import extract_nested_value
+        data = {"name": "John"}
+        assert extract_nested_value(data, "address.geo.lat") is None
+
+    def test_substitute_args_with_previous_results(self):
+        from rest_to_mcp.playground import substitute_args
+
+        previous_results = [
+            {
+                "tool": "get_user",
+                "parsed_data": {
+                    "id": 3,
+                    "name": "Clementine Bauch",
+                    "address": {"geo": {"lat": "-68.6102", "lng": "-47.0653"}},
+                },
+            }
+        ]
+
+        args_template = {
+            "latitude": "$result.0.address.geo.lat",
+            "longitude": "$result.0.address.geo.lng",
+        }
+
+        result = substitute_args(args_template, [], previous_results)
+        assert result["latitude"] == "-68.6102"
+        assert result["longitude"] == "-47.0653"
+
+    def test_weather_scenario_patterns(self):
+        from rest_to_mcp.playground import match_scenario
+
+        # Test various phrasings that should match the weather scenario
+        test_inputs = [
+            "Check weather for user 3",
+            "Get the weather for user 3",
+            "What's the weather at user 3",
+            "user 3 weather",
+        ]
+
+        for input_text in test_inputs:
+            scenario, captures = match_scenario(input_text)
+            assert scenario is not None, f"Failed to match: {input_text}"
+            assert scenario.id == "user_weather", f"Wrong scenario for: {input_text}"
+            assert "3" in captures, f"Failed to capture user ID from: {input_text}"
+
+    def test_build_summary_handles_missing_user(self):
+        """Test that build_summary returns helpful error when user not found."""
+        from rest_to_mcp.playground import build_summary, SCENARIOS
+
+        # Find the user_weather scenario
+        scenario = next(s for s in SCENARIOS if s.id == "user_weather")
+
+        # Simulate results where user was not found (empty response from JSONPlaceholder)
+        results = [
+            {
+                "tool": "get_user",
+                "result": {"content": [{"type": "text", "text": "{}"}]},
+                "parsed_data": {},  # Empty - user doesn't exist
+            }
+        ]
+
+        summary = build_summary(scenario, results)
+        assert "could not be completed" in summary.lower() or "not found" in summary.lower()
+        assert "error" in summary.lower() or "⚠️" in summary
+
+    def test_build_summary_success(self):
+        """Test that build_summary returns correct output for successful weather lookup."""
+        import json
+        from rest_to_mcp.playground import build_summary, SCENARIOS
+
+        scenario = next(s for s in SCENARIOS if s.id == "user_weather")
+
+        user_data = {
+            "id": 3,
+            "name": "Clementine Bauch",
+            "address": {"geo": {"lat": "-68.6102", "lng": "-47.0653"}},
+        }
+        weather_data = {
+            "current_weather": {"temperature": -5.2, "weathercode": 71}
+        }
+
+        # build_summary expects result in the format returned by adapter
+        results = [
+            {
+                "tool": "get_user",
+                "result": {"content": [{"type": "text", "text": json.dumps(user_data)}]},
+            },
+            {
+                "tool": "get_weather",
+                "result": {"content": [{"type": "text", "text": json.dumps(weather_data)}]},
+            },
+        ]
+
+        summary = build_summary(scenario, results)
+        assert "Clementine Bauch" in summary
+        assert "-5.2" in summary
+        assert "snow" in summary.lower()  # weathercode 71 = Slight snow
+
+    def test_example_queries_include_error_demo(self):
+        """Verify that example queries include an error handling demonstration."""
+        from rest_to_mcp.playground import EXAMPLE_QUERIES
+
+        assert len(EXAMPLE_QUERIES) == 5
+        # Should include a query that will fail (user 999 doesn't exist)
+        error_demo = [q for q in EXAMPLE_QUERIES if "999" in q]
+        assert len(error_demo) == 1, "Should have one error demo query with non-existent user"

@@ -177,7 +177,8 @@ class TestServerIntegration:
         assert response.status_code == 200
         data = response.json()
         assert "tools" in data
-        assert len(data["tools"]) == 8
+        # 8 JSONPlaceholder + 2 Open-Meteo weather tools
+        assert len(data["tools"]) == 10
 
     @pytest.mark.asyncio
     async def test_mcp_initialize(self, client):
@@ -202,7 +203,8 @@ class TestServerIntegration:
         
         assert response.status_code == 200
         data = response.json()
-        assert len(data["result"]["tools"]) == 8
+        # 8 JSONPlaceholder + 2 Open-Meteo weather tools
+        assert len(data["result"]["tools"]) == 10
 
     @skip_without_network
     @pytest.mark.asyncio

@@ -46,10 +46,11 @@ document.addEventListener('alpine:init', () => {
         playgroundSummary: null,
         playgroundSocket: null,
         playgroundExamples: [
+            "Check weather for user 3",
             "Get all posts by user 1",
             "Show post 5 with comments",
-            "Get user 2 profile",
-            "List available tools"
+            "List available tools",
+            "Get weather for user 999"
         ],
 
         // Example requests for quick testing

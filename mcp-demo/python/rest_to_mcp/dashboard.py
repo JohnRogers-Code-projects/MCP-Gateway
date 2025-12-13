@@ -294,10 +294,11 @@ async def websocket_playground(websocket: WebSocket) -> None:
                 "label": step.label,
             })
 
-            # Build arguments from template
-            args = substitute_args(step.args_template, captures)
+            # Build arguments from template (pass previous results for cross-step data flow)
+            args = substitute_args(step.args_template, captures, results)
 
             # Execute the tool
+            parsed_data = {}
             try:
                 if step.tool == "__tools_list__":
                     # Special case: tools/list
@@ -305,14 +306,25 @@ async def websocket_playground(websocket: WebSocket) -> None:
                     request = JsonRpcRequest(id=1, method="tools/list", params={})
                     response = await _adapter.handle_request(request)
                     tool_result = response.result if hasattr(response, "result") else {}
+                    parsed_data = tool_result
                 else:
                     # Normal tool call
                     tool_result = await _adapter.call_tool(step.tool, args)
                     tool_result = tool_result.model_dump() if hasattr(tool_result, "model_dump") else tool_result
+
+                    # Parse the JSON from content for cross-step data flow
+                    if isinstance(tool_result, dict) and "content" in tool_result:
+                        content_list = tool_result.get("content", [])
+                        if content_list and isinstance(content_list[0], dict):
+                            text = content_list[0].get("text", "")
+                            try:
+                                parsed_data = json.loads(text)
+                            except (json.JSONDecodeError, TypeError):
+                                parsed_data = {}
             except Exception as e:
                 tool_result = {"error": str(e)}
 
-            results.append({"tool": step.tool, "result": tool_result})
+            results.append({"tool": step.tool, "args": args, "result": tool_result, "parsed_data": parsed_data})
 
             # Send step result
             await websocket.send_json({

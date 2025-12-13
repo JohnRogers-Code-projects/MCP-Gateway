@@ -497,38 +497,51 @@ GET https://jsonplaceholder.typicode.com/posts/1
                     <span x-text="playgroundScenario"></span>
                 </div>
 
-                <!-- Step-by-step trace -->
-                <div class="execution-steps">
-                    <template x-for="(step, index) in playgroundSteps" :key="index">
-                        <div class="execution-step" :class="{ 'step-complete': step.complete, 'step-active': step.active }">
-                            <div class="step-header">
-                                <span class="step-number" x-text="index + 1"></span>
-                                <span class="step-tool" x-text="step.tool"></span>
-                                <span class="step-label" x-text="step.label"></span>
-                                <span class="spinner" x-show="step.active && !step.complete" style="width: 16px; height: 16px;"></span>
-                                <span class="step-check" x-show="step.complete">&#10003;</span>
-                            </div>
-
-                            <!-- Tool call details (expandable) -->
-                            <div class="step-details" x-show="step.args || step.result">
-                                <div x-show="step.args" class="step-section">
-                                    <strong><span data-tooltip="The input data sent to this tool - like telling it which user ID to look up">Arguments:</span></strong>
-                                    <pre><code x-text="formatJson(step.args)"></code></pre>
-                                </div>
-                                <div x-show="step.result" class="step-section">
-                                    <strong><span data-tooltip="What the tool returned - the actual data fetched from the API">Result:</span></strong>
-                                    <pre><code x-text="truncateResult(step.result)"></code></pre>
-                                </div>
-                            </div>
-                        </div>
-                    </template>
+                <!-- Final summary - SHOWN FIRST -->
+                <div x-show="playgroundSummary" class="playground-summary" style="margin-bottom: 1.5rem; padding: 1rem; background: var(--bg-tertiary); border-radius: 8px; border-left: 4px solid var(--accent);">
+                    <h3 style="margin-top: 0; color: var(--accent);">Result</h3>
+                    <pre style="white-space: pre-wrap; font-family: inherit; margin: 0; background: transparent; font-size: 1rem;" x-text="playgroundSummary"></pre>
                 </div>
 
-                <!-- Final summary -->
-                <div x-show="playgroundSummary" class="playground-summary">
-                    <h3>Summary</h3>
-                    <p x-text="playgroundSummary"></p>
-                </div>
+                <!-- Step-by-step trace (collapsible) -->
+                <details class="execution-steps-details" x-show="playgroundSteps.length > 0">
+                    <summary style="cursor: pointer; color: var(--text-secondary); margin-bottom: 1rem; user-select: none;">
+                        <span style="font-weight: 500;">Show execution trace</span>
+                        <span style="font-size: 0.85rem; margin-left: 0.5rem;" x-text="'(' + playgroundSteps.length + ' steps)'"></span>
+                    </summary>
+                    <div class="execution-steps">
+                        <template x-for="(step, index) in playgroundSteps" :key="index">
+                            <div class="execution-step" :class="{ 'step-complete': step.complete, 'step-active': step.active, 'step-error': step.isError }">
+                                <div class="step-header">
+                                    <span class="step-number" x-text="index + 1"></span>
+                                    <span class="step-tool" x-text="step.tool"></span>
+                                    <!-- API Source Badge -->
+                                    <span class="api-badge"
+                                          :class="step.tool === 'get_weather' || step.tool === 'get_forecast' ? 'api-weather' : 'api-jsonplaceholder'"
+                                          x-text="step.tool === 'get_weather' || step.tool === 'get_forecast' ? 'Open-Meteo' : 'JSONPlaceholder'"
+                                          x-show="step.tool && step.tool !== '...' && step.tool !== '__tools_list__'"></span>
+                                    <span class="step-label" x-text="step.label"></span>
+                                    <span class="spinner" x-show="step.active && !step.complete" style="width: 16px; height: 16px;"></span>
+                                    <span class="step-check" x-show="step.complete && !step.isError">&#10003;</span>
+                                    <span class="step-error-icon" x-show="step.isError" style="color: #f85149;">&#10007;</span>
+                                </div>
+
+                                <!-- Tool call details (collapsible per step) -->
+                                <details class="step-details" x-show="step.args || step.result">
+                                    <summary style="cursor: pointer; font-size: 0.85rem; color: var(--text-secondary); margin: 0.5rem 0;">Show details</summary>
+                                    <div x-show="step.args" class="step-section">
+                                        <strong><span data-tooltip="The input data sent to this tool - like telling it which user ID to look up">Arguments:</span></strong>
+                                        <pre><code x-text="formatJson(step.args)"></code></pre>
+                                    </div>
+                                    <div x-show="step.result" class="step-section">
+                                        <strong><span data-tooltip="What the tool returned - the actual data fetched from the API">Result:</span></strong>
+                                        <pre><code x-text="truncateResult(step.result)"></code></pre>
+                                    </div>
+                                </details>
+                            </div>
+                        </template>
+                    </div>
+                </details>
             </div>
         </div>
 

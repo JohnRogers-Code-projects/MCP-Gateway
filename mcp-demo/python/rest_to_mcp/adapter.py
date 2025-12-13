@@ -57,6 +57,7 @@ class RestEndpoint:
     - path_params: Parameters that go in the URL path
     - query_params: Parameters that go in the query string
     - body_params: Parameters that go in the request body
+    - base_url: Optional API-specific base URL (enables multi-API support)
     """
 
     name: str
@@ -66,6 +67,7 @@ class RestEndpoint:
     path_params: list[str] | None = None
     query_params: list[str] | None = None
     body_params: list[str] | None = None
+    base_url: str | None = None  # For multi-API composition
 
     def to_mcp_tool(self) -> Tool:
         """Convert this REST endpoint definition to an MCP Tool."""
@@ -176,9 +178,15 @@ class RestToMcpAdapter:
             body = {k: arguments[k] for k in endpoint.body_params if k in arguments}
 
         try:
+            # Use endpoint-specific base_url if provided (multi-API support)
+            if endpoint.base_url:
+                url = endpoint.base_url.rstrip("/") + path
+            else:
+                url = path  # Relative to adapter's base_url
+
             response = await self.client.request(
                 method=endpoint.method.value,
-                url=path,
+                url=url,
                 params=query_params or None,
                 json=body,
             )
@@ -258,7 +266,33 @@ class RestToMcpAdapter:
 
 
 # -----------------------------------------------------------------------------
-# Pre-configured adapter for JSONPlaceholder API
+# Open-Meteo Weather API endpoints (multi-API demonstration)
+# -----------------------------------------------------------------------------
+
+OPEN_METEO_BASE = "https://api.open-meteo.com"
+
+OPEN_METEO_ENDPOINTS = [
+    RestEndpoint(
+        name="get_weather",
+        path="/v1/forecast",
+        method=HttpMethod.GET,
+        description="Get current weather for coordinates. Returns temperature, wind speed, and conditions.",
+        query_params=["latitude", "longitude", "current_weather"],
+        base_url=OPEN_METEO_BASE,
+    ),
+    RestEndpoint(
+        name="get_forecast",
+        path="/v1/forecast",
+        method=HttpMethod.GET,
+        description="Get 7-day weather forecast for coordinates.",
+        query_params=["latitude", "longitude", "daily", "timezone"],
+        base_url=OPEN_METEO_BASE,
+    ),
+]
+
+
+# -----------------------------------------------------------------------------
+# JSONPlaceholder API endpoints
 # -----------------------------------------------------------------------------
 
 JSONPLACEHOLDER_ENDPOINTS = [
@@ -321,9 +355,26 @@ JSONPLACEHOLDER_ENDPOINTS = [
 ]
 
 
+# Combined endpoints for multi-API demonstration
+DEFAULT_ENDPOINTS = JSONPLACEHOLDER_ENDPOINTS + OPEN_METEO_ENDPOINTS
+
+
 def create_jsonplaceholder_adapter() -> RestToMcpAdapter:
     """Create an adapter pre-configured for JSONPlaceholder API."""
     return RestToMcpAdapter(
         base_url="https://jsonplaceholder.typicode.com",
         endpoints=JSONPLACEHOLDER_ENDPOINTS,
+    )
+
+
+def create_multi_api_adapter() -> RestToMcpAdapter:
+    """
+    Create an adapter with multiple APIs registered.
+
+    Demonstrates ContextForge's key value prop: bringing a client's
+    vast portfolio of existing APIs into the AI agent ecosystem.
+    """
+    return RestToMcpAdapter(
+        base_url="https://jsonplaceholder.typicode.com",  # Default for relative paths
+        endpoints=DEFAULT_ENDPOINTS,
     )

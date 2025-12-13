@@ -20,7 +20,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from .adapter import RestToMcpAdapter, create_jsonplaceholder_adapter
+from .adapter import RestToMcpAdapter, create_multi_api_adapter
 from .dashboard import get_static_files, router as dashboard_router, set_adapter
 from .models import ErrorCode, JsonRpcRequest, make_error_response
 
@@ -35,7 +35,7 @@ adapter: RestToMcpAdapter | None = None
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage adapter lifecycle - startup and shutdown."""
     global adapter
-    adapter = create_jsonplaceholder_adapter()
+    adapter = create_multi_api_adapter()
     # Share adapter with dashboard for playground feature
     set_adapter(adapter)
     yield
@@ -51,9 +51,9 @@ app = FastAPI(
     title="REST-to-MCP Adapter",
     description=(
         "Translates REST APIs into MCP-compliant tool interfaces. "
-        "Demo adapter for JSONPlaceholder API."
+        "Demo adapter with multi-API support: JSONPlaceholder + Open-Meteo."
     ),
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
