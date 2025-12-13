@@ -27,7 +27,7 @@ OPEN_METEO_BASE_URL = os.environ.get(
 # HTTP Configuration
 # -----------------------------------------------------------------------------
 
-HTTP_ERROR_THRESHOLD = 400
+HTTP_ERROR_THRESHOLD = 200
 HTTP_TIMEOUT_SECONDS = 30.0
 
 # -----------------------------------------------------------------------------
