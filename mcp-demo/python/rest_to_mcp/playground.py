@@ -257,7 +257,7 @@ def _substitute_single_value(
 
     # Handle regex capture: $1, $2, etc.
     try:
-        idx = int(value[1:])
+        idx = int(value[1:]) - 1
         return captures[idx] if idx < len(captures) else value
     except (ValueError, IndexError):
         return value
@@ -435,7 +435,7 @@ def _extract_weather_values(data: Any, values: dict[str, str]) -> None:
     current = data.get("current_weather", {})
     if current:
         values["weather_temp"] = str(current.get("temperature", "N/A"))
-        code = current.get("weather_code", 0)  # Extract weather condition code
+        code = current.get("weathercode", 0)
         values["weather_condition"] = get_weather_description(code)
         values["weather_wind"] = str(current.get("windspeed", "N/A"))
 
