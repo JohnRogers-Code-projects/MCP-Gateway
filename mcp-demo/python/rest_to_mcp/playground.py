@@ -8,9 +8,12 @@ Uses pattern matching to map natural language to predefined scenarios.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Any
+
+from .config import JSONPLACEHOLDER_MAX_USER_ID, get_weather_description
 
 
 @dataclass
@@ -227,32 +230,37 @@ def substitute_args(
 
     for key, value in args_template.items():
         if isinstance(value, str) and value.startswith("$"):
-            # Handle result extraction: $result.0.address.geo.lat
-            if value.startswith("$result."):
-                path = value[8:]  # Remove "$result."
-                parts = path.split(".", 1)
-                if len(parts) >= 1 and parts[0].isdigit():
-                    result_idx = int(parts[0])
-                    if result_idx < len(previous_results):
-                        result_data = previous_results[result_idx].get("parsed_data", {})
-                        if len(parts) > 1:
-                            result[key] = extract_nested_value(result_data, parts[1])
-                        else:
-                            result[key] = result_data
-                    else:
-                        result[key] = value  # Keep template if result not available
-                else:
-                    result[key] = value
-            # Handle regex capture: $1, $2, etc.
-            else:
-                try:
-                    idx = int(value[1:]) - 1
-                    result[key] = captures[idx] if idx < len(captures) else value
-                except (ValueError, IndexError):
-                    result[key] = value
+            result[key] = _substitute_single_value(value, captures, previous_results)
         else:
             result[key] = value
     return result
+
+
+def _substitute_single_value(
+    value: str,
+    captures: list[str],
+    previous_results: list[dict[str, Any]],
+) -> Any:
+    """Substitute a single template value."""
+    # Handle result extraction: $result.0.address.geo.lat
+    if value.startswith("$result."):
+        path = value[8:]  # Remove "$result."
+        parts = path.split(".", 1)
+        if len(parts) >= 1 and parts[0].isdigit():
+            result_idx = int(parts[0])
+            if result_idx < len(previous_results):
+                result_data = previous_results[result_idx].get("parsed_data", {})
+                if len(parts) > 1:
+                    return extract_nested_value(result_data, parts[1])
+                return result_data
+        return value  # Keep template if result not available
+
+    # Handle regex capture: $1, $2, etc.
+    try:
+        idx = int(value[1:]) - 1
+        return captures[idx] if idx < len(captures) else value
+    except (ValueError, IndexError):
+        return value
 
 
 def build_summary(scenario: Scenario, results: list[dict[str, Any]]) -> str:
@@ -266,9 +274,6 @@ def build_summary(scenario: Scenario, results: list[dict[str, Any]]) -> str:
     Returns:
         Human-readable summary string
     """
-    template = scenario.summary_template
-
-    # Extract useful values from results
     values: dict[str, str] = {}
     errors: list[str] = []
 
@@ -276,134 +281,188 @@ def build_summary(scenario: Scenario, results: list[dict[str, Any]]) -> str:
         tool = result.get("tool", "")
         content = result.get("result", {})
 
-        # Check for explicit errors in the result
-        if isinstance(content, dict) and content.get("isError"):
-            error_content = content.get("content", [{}])
-            if error_content and isinstance(error_content[0], dict):
-                error_text = error_content[0].get("text", "Unknown error")
-                errors.append(f"{tool}: {error_text}")
+        # Check for explicit errors
+        if _is_error_result(content):
+            errors.append(_extract_error_message(tool, content))
             continue
 
-        # Handle different content structures
-        if isinstance(content, dict):
-            # Direct content (when result is already parsed)
-            if "content" in content:
-                content_list = content.get("content", [])
-                if content_list and isinstance(content_list[0], dict):
-                    text = content_list[0].get("text", "")
-                    try:
-                        import json
-                        data = json.loads(text)
-                    except (json.JSONDecodeError, TypeError):
-                        data = {}
-                else:
-                    data = {}
-            else:
-                data = content
-        else:
-            data = {}
+        # Parse the data from the result
+        data = _parse_result_data(content)
 
         # Extract values based on tool type
-        if tool == "get_user" and isinstance(data, dict):
-            user_name = data.get("name")
-            user_id = data.get("id")
-            if not user_name or not user_id:
-                # User not found - JSONPlaceholder returns empty {} for invalid IDs
-                # Try to get the requested ID from the step args
-                step_args = result.get("args", {})
-                requested_id = step_args.get("id", "unknown")
-                errors.append(
-                    f"User {requested_id} does not exist in the database. "
-                    f"JSONPlaceholder only has users 1-10. "
-                    f"Try a valid user ID like 1, 2, or 3."
-                )
-                values["user_name"] = "Unknown"
-            else:
-                values["user_name"] = user_name
-            values["user_email"] = data.get("email", "")
+        tool_errors = _extract_tool_values(tool, data, result, values)
+        errors.extend(tool_errors)
 
-        elif tool == "get_post" and isinstance(data, dict):
-            values["post_id"] = str(data.get("id", ""))
-            values["post_title"] = data.get("title", "")[:50]
-
-        elif tool == "get_posts" and isinstance(data, list):
-            values["post_count"] = str(len(data))
-
-        elif tool == "get_comments" and isinstance(data, list):
-            values["comment_count"] = str(len(data))
-
-        elif tool == "__tools_list__":
-            # Handle tools/list response - build a human-readable list
-            if isinstance(data, dict) and "tools" in data:
-                tools = data["tools"]
-                values["tool_count"] = str(len(tools))
-                # Build formatted tool list
-                tool_lines = []
-                for t in tools:
-                    name = t.get("name", "unknown")
-                    desc = t.get("description", "No description")
-                    # Truncate long descriptions
-                    if len(desc) > 60:
-                        desc = desc[:57] + "..."
-                    tool_lines.append(f"  • {name}: {desc}")
-                values["tool_list"] = "\n".join(tool_lines)
-            else:
-                values["tool_count"] = "multiple"
-                values["tool_list"] = "  (unable to parse tool list)"
-
-        elif tool == "get_weather" and isinstance(data, dict):
-            # Handle Open-Meteo weather response
-            current = data.get("current_weather", {})
-            if current:
-                values["weather_temp"] = str(current.get("temperature", "N/A"))
-                # Map WMO weather codes to descriptions
-                code = current.get("weathercode", 0)
-                conditions = {
-                    0: "Clear sky",
-                    1: "Mainly clear",
-                    2: "Partly cloudy",
-                    3: "Overcast",
-                    45: "Fog",
-                    48: "Depositing rime fog",
-                    51: "Light drizzle",
-                    53: "Moderate drizzle",
-                    55: "Dense drizzle",
-                    61: "Slight rain",
-                    63: "Moderate rain",
-                    65: "Heavy rain",
-                    71: "Slight snow",
-                    73: "Moderate snow",
-                    75: "Heavy snow",
-                    80: "Slight showers",
-                    81: "Moderate showers",
-                    82: "Violent showers",
-                    95: "Thunderstorm",
-                }
-                values["weather_condition"] = conditions.get(code, f"Code {code}")
-                values["weather_wind"] = str(current.get("windspeed", "N/A"))
-
-    # If there were errors, return a helpful error message
+    # Return error message if any errors occurred
     if errors:
-        error_msg = "⚠️ Request could not be completed:\n\n"
-        for err in errors:
-            error_msg += f"  • {err}\n"
-        error_msg += "\nThis demonstrates graceful error handling. "
-        error_msg += "In a real system, the agent would retry or ask for clarification."
-        return error_msg
+        return _format_error_summary(errors)
 
     # Substitute values into template
+    return _format_success_summary(scenario, values)
+
+
+def _is_error_result(content: Any) -> bool:
+    """Check if result indicates an error."""
+    return isinstance(content, dict) and content.get("isError", False)
+
+
+def _extract_error_message(tool: str, content: dict[str, Any]) -> str:
+    """Extract error message from error result."""
+    error_content = content.get("content", [{}])
+    if error_content and isinstance(error_content[0], dict):
+        error_text = error_content[0].get("text", "Unknown error")
+        return f"{tool}: {error_text}"
+    return f"{tool}: Unknown error"
+
+
+def _parse_result_data(content: Any) -> Any:
+    """Parse data from result content."""
+    if not isinstance(content, dict):
+        return {}
+
+    # Direct content (when result is already parsed)
+    if "content" in content:
+        content_list = content.get("content", [])
+        if content_list and isinstance(content_list[0], dict):
+            text = content_list[0].get("text", "")
+            try:
+                return json.loads(text)
+            except (json.JSONDecodeError, TypeError):
+                return {}
+        return {}
+
+    return content
+
+
+def _extract_tool_values(
+    tool: str,
+    data: Any,
+    result: dict[str, Any],
+    values: dict[str, str],
+) -> list[str]:
+    """Extract values from tool result into values dict. Returns any errors."""
+    errors: list[str] = []
+
+    if tool == "get_user":
+        errors.extend(_extract_user_values(data, result, values))
+    elif tool == "get_post":
+        _extract_post_values(data, values)
+    elif tool == "get_posts":
+        _extract_posts_values(data, values)
+    elif tool == "get_comments":
+        _extract_comments_values(data, values)
+    elif tool == "__tools_list__":
+        _extract_tools_list_values(data, values)
+    elif tool == "get_weather":
+        _extract_weather_values(data, values)
+
+    return errors
+
+
+def _extract_user_values(
+    data: Any,
+    result: dict[str, Any],
+    values: dict[str, str],
+) -> list[str]:
+    """Extract user-related values."""
+    errors: list[str] = []
+
+    if not isinstance(data, dict):
+        return errors
+
+    user_name = data.get("name")
+    user_id = data.get("id")
+
+    if not user_name or not user_id:
+        # User not found - JSONPlaceholder returns empty {} for invalid IDs
+        step_args = result.get("args", {})
+        requested_id = step_args.get("id", "unknown")
+        errors.append(
+            f"User {requested_id} does not exist in the database. "
+            f"JSONPlaceholder only has users 1-{JSONPLACEHOLDER_MAX_USER_ID}. "
+            f"Try a valid user ID like 1, 2, or 3."
+        )
+        values["user_name"] = "Unknown"
+    else:
+        values["user_name"] = user_name
+
+    values["user_email"] = data.get("email", "")
+    return errors
+
+
+def _extract_post_values(data: Any, values: dict[str, str]) -> None:
+    """Extract post-related values."""
+    if isinstance(data, dict):
+        values["post_id"] = str(data.get("id", ""))
+        values["post_title"] = data.get("title", "")[:50]
+
+
+def _extract_posts_values(data: Any, values: dict[str, str]) -> None:
+    """Extract posts list values."""
+    if isinstance(data, list):
+        values["post_count"] = str(len(data))
+
+
+def _extract_comments_values(data: Any, values: dict[str, str]) -> None:
+    """Extract comments list values."""
+    if isinstance(data, list):
+        values["comment_count"] = str(len(data))
+
+
+def _extract_tools_list_values(data: Any, values: dict[str, str]) -> None:
+    """Extract tools list values."""
+    if isinstance(data, dict) and "tools" in data:
+        tools = data["tools"]
+        values["tool_count"] = str(len(tools))
+        tool_lines = []
+        for t in tools:
+            name = t.get("name", "unknown")
+            desc = t.get("description", "No description")
+            if len(desc) > 60:
+                desc = desc[:57] + "..."
+            tool_lines.append(f"  • {name}: {desc}")
+        values["tool_list"] = "\n".join(tool_lines)
+    else:
+        values["tool_count"] = "multiple"
+        values["tool_list"] = "  (unable to parse tool list)"
+
+
+def _extract_weather_values(data: Any, values: dict[str, str]) -> None:
+    """Extract weather-related values."""
+    if not isinstance(data, dict):
+        return
+
+    current = data.get("current_weather", {})
+    if current:
+        values["weather_temp"] = str(current.get("temperature", "N/A"))
+        code = current.get("weathercode", 0)
+        values["weather_condition"] = get_weather_description(code)
+        values["weather_wind"] = str(current.get("windspeed", "N/A"))
+
+
+def _format_error_summary(errors: list[str]) -> str:
+    """Format error messages into summary."""
+    error_msg = "Request could not be completed:\n\n"
+    for err in errors:
+        error_msg += f"  • {err}\n"
+    error_msg += "\nThis demonstrates graceful error handling. "
+    error_msg += "In a real system, the agent would retry or ask for clarification."
+    return error_msg
+
+
+def _format_success_summary(scenario: Scenario, values: dict[str, str]) -> str:
+    """Format successful result into summary."""
     try:
-        return template.format(**values)
+        return scenario.summary_template.format(**values)
     except KeyError:
-        # Fallback if template variables missing
         return f"Completed {scenario.description}"
 
 
 # Example queries for the UI
 EXAMPLE_QUERIES = [
-    "Check weather for user 3",      # Cross-API: JSONPlaceholder → Open-Meteo
-    "Get all posts by user 1",       # Multi-step: user lookup + posts
-    "Show post 5 with comments",     # Multi-step: post + comments
-    "List available tools",          # Tool discovery
-    "Get weather for user 999",      # Error handling demo (user doesn't exist)
+    "Check weather for user 3",  # Cross-API: JSONPlaceholder + Open-Meteo
+    "Get all posts by user 1",  # Multi-step: user lookup + posts
+    "Show post 5 with comments",  # Multi-step: post + comments
+    "List available tools",  # Tool discovery
+    "Get weather for user 999",  # Error handling demo (user doesn't exist)
 ]

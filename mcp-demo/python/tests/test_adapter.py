@@ -6,40 +6,37 @@ Uses httpx's mock transport for isolated testing.
 """
 
 import json
+from typing import Any
 
 import httpx
 import pytest
 
-from rest_to_mcp.adapter import (
-    HttpMethod,
-    RestEndpoint,
-    RestToMcpAdapter,
-    JSONPLACEHOLDER_ENDPOINTS,
-)
+from rest_to_mcp.endpoints import HttpMethod, RestEndpoint
+from rest_to_mcp.adapter import RestToMcpAdapter, JSONPLACEHOLDER_ENDPOINTS
 from rest_to_mcp.models import JsonRpcRequest
 
 
 # -----------------------------------------------------------------------------
-# Mock HTTP Transport
+# Mock HTTP Transport (local copy for tests that don't use fixtures)
 # -----------------------------------------------------------------------------
 
 
 class MockTransport(httpx.AsyncBaseTransport):
     """Mock transport that returns predefined responses."""
 
-    def __init__(self, responses: dict[str, tuple[int, dict]]):
+    def __init__(self, responses: dict[str, tuple[int, dict[str, Any]]]):
         self.responses = responses
         self.requests: list[httpx.Request] = []
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
-        
+
         # Match by path
         path = request.url.path
         if path in self.responses:
             status, data = self.responses[path]
             return httpx.Response(status, json=data)
-        
+
         return httpx.Response(404, json={"error": "Not found"})
 
 
@@ -295,19 +292,20 @@ class TestMultiApiSupport:
     """Tests for multi-API composition feature."""
 
     def test_open_meteo_endpoints_defined(self):
-        from rest_to_mcp.adapter import OPEN_METEO_ENDPOINTS
+        from rest_to_mcp.endpoints import OPEN_METEO_ENDPOINTS
         assert len(OPEN_METEO_ENDPOINTS) == 2
         names = [e.name for e in OPEN_METEO_ENDPOINTS]
         assert "get_weather" in names
         assert "get_forecast" in names
 
     def test_open_meteo_endpoints_have_base_url(self):
-        from rest_to_mcp.adapter import OPEN_METEO_ENDPOINTS, OPEN_METEO_BASE
+        from rest_to_mcp.endpoints import OPEN_METEO_ENDPOINTS
+        from rest_to_mcp.config import OPEN_METEO_BASE_URL
         for endpoint in OPEN_METEO_ENDPOINTS:
-            assert endpoint.base_url == OPEN_METEO_BASE
+            assert endpoint.base_url == OPEN_METEO_BASE_URL
 
     def test_default_endpoints_combines_apis(self):
-        from rest_to_mcp.adapter import DEFAULT_ENDPOINTS
+        from rest_to_mcp.endpoints import DEFAULT_ENDPOINTS
         # 8 JSONPlaceholder + 2 Open-Meteo
         assert len(DEFAULT_ENDPOINTS) == 10
 
@@ -325,7 +323,8 @@ class TestMultiApiSupport:
 
     def test_endpoint_with_base_url_generates_full_url(self):
         """Verify that endpoint-specific base_url is used in URL construction."""
-        from rest_to_mcp.adapter import RestEndpoint, HttpMethod, OPEN_METEO_BASE
+        from rest_to_mcp.endpoints import RestEndpoint, HttpMethod
+        from rest_to_mcp.config import OPEN_METEO_BASE_URL
 
         endpoint = RestEndpoint(
             name="test_weather",
@@ -333,7 +332,7 @@ class TestMultiApiSupport:
             method=HttpMethod.GET,
             description="Test weather endpoint",
             query_params=["latitude"],
-            base_url=OPEN_METEO_BASE,
+            base_url=OPEN_METEO_BASE_URL,
         )
 
         # The endpoint should have its own base_url

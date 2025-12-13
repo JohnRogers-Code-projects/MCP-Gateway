@@ -10,9 +10,58 @@ Reference: https://modelcontextprotocol.io/specification
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
+
+from .config import MCP_PROTOCOL_VERSION, SERVER_NAME, SERVER_VERSION
+
+
+# -----------------------------------------------------------------------------
+# TypedDict Definitions for Structured Data
+# -----------------------------------------------------------------------------
+
+
+class TextContentDict(TypedDict):
+    """Dictionary representation of text content."""
+
+    type: Literal["text"]
+    text: str
+
+
+class ImageContentDict(TypedDict):
+    """Dictionary representation of image content."""
+
+    type: Literal["image"]
+    data: str
+    mimeType: str
+
+
+ContentBlockDict = TextContentDict | ImageContentDict
+
+
+class ToolCallResultDict(TypedDict):
+    """Dictionary representation of tool call result."""
+
+    content: list[ContentBlockDict]
+    isError: bool
+
+
+class ScenarioStepResultDict(TypedDict, total=False):
+    """Dictionary representation of a scenario step result."""
+
+    tool: str
+    args: dict[str, Any]
+    result: ToolCallResultDict
+    parsed_data: dict[str, Any]
+
+
+class ToolDict(TypedDict):
+    """Dictionary representation of an MCP tool."""
+
+    name: str
+    description: str
+    inputSchema: dict[str, Any]
 
 # -----------------------------------------------------------------------------
 # JSON-RPC 2.0 Base Types
@@ -149,9 +198,9 @@ class ListToolsResult(BaseModel):
 class InitializeResult(BaseModel):
     """Response to initialize method."""
 
-    protocolVersion: str = "2024-11-05"  # noqa: N815
+    protocolVersion: str = MCP_PROTOCOL_VERSION  # noqa: N815
     serverInfo: dict[str, str] = Field(  # noqa: N815
-        default_factory=lambda: {"name": "rest-to-mcp-adapter", "version": "0.1.0"}
+        default_factory=lambda: {"name": SERVER_NAME, "version": SERVER_VERSION}
     )
     capabilities: dict[str, Any] = Field(default_factory=lambda: {"tools": {}})
 
