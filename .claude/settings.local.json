@@ -34,7 +34,8 @@
       "Bash(taskkill:*)",
       "Bash(.venvScriptspython.exe:*)",
       "Bash(.venv/Scripts/activate)",
-      "Bash(uvicorn:*)"
+      "Bash(uvicorn:*)",
+      "Bash(wc:*)"
     ],
     "deny": [],
     "ask": []

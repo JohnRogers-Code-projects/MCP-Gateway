@@ -13,12 +13,21 @@ The adapter:
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from enum import Enum
 from typing import Any
 
 import httpx
 
+from .config import (
+    HTTP_ERROR_THRESHOLD,
+    HTTP_TIMEOUT_SECONDS,
+    JSONPLACEHOLDER_BASE_URL,
+)
+from .endpoints import (
+    DEFAULT_ENDPOINTS,
+    JSONPLACEHOLDER_ENDPOINTS,
+    HttpMethod,
+    RestEndpoint,
+)
 from .models import (
     ContentBlock,
     ErrorCode,
@@ -31,72 +40,26 @@ from .models import (
     Tool,
     ToolCallParams,
     ToolCallResult,
-    ToolInputSchema,
     make_error_response,
     make_success_response,
 )
 
+# Re-export for backward compatibility
+__all__ = [
+    "HttpMethod",
+    "RestEndpoint",
+    "RestToMcpAdapter",
+    "create_jsonplaceholder_adapter",
+    "create_multi_api_adapter",
+    "JSONPLACEHOLDER_ENDPOINTS",
+    "OPEN_METEO_ENDPOINTS",
+    "OPEN_METEO_BASE",
+    "DEFAULT_ENDPOINTS",
+]
 
-class HttpMethod(str, Enum):
-    GET = "GET"
-    POST = "POST"
-    PUT = "PUT"
-    DELETE = "DELETE"
-    PATCH = "PATCH"
-
-
-@dataclass
-class RestEndpoint:
-    """
-    Definition of a REST endpoint to expose as an MCP tool.
-
-    This maps REST semantics to MCP tool semantics:
-    - path: URL path (may contain {param} placeholders)
-    - method: HTTP method
-    - description: Human-readable description for LLM agents
-    - path_params: Parameters that go in the URL path
-    - query_params: Parameters that go in the query string
-    - body_params: Parameters that go in the request body
-    - base_url: Optional API-specific base URL (enables multi-API support)
-    """
-
-    name: str
-    path: str
-    method: HttpMethod
-    description: str
-    path_params: list[str] | None = None
-    query_params: list[str] | None = None
-    body_params: list[str] | None = None
-    base_url: str | None = None  # For multi-API composition
-
-    def to_mcp_tool(self) -> Tool:
-        """Convert this REST endpoint definition to an MCP Tool."""
-        properties: dict[str, dict[str, Any]] = {}
-        required: list[str] = []
-
-        # Path params are always required
-        for param in self.path_params or []:
-            properties[param] = {"type": "string", "description": f"Path parameter: {param}"}
-            required.append(param)
-
-        # Query params are optional by default
-        for param in self.query_params or []:
-            properties[param] = {"type": "string", "description": f"Query parameter: {param}"}
-
-        # Body params - required for POST/PUT/PATCH
-        for param in self.body_params or []:
-            properties[param] = {"type": "string", "description": f"Body field: {param}"}
-            if self.method in (HttpMethod.POST, HttpMethod.PUT, HttpMethod.PATCH):
-                required.append(param)
-
-        return Tool(
-            name=self.name,
-            description=self.description,
-            inputSchema=ToolInputSchema(
-                properties=properties,
-                required=required,
-            ),
-        )
+# Backward compatibility aliases
+from .endpoints import OPEN_METEO_ENDPOINTS
+from .config import OPEN_METEO_BASE_URL as OPEN_METEO_BASE
 
 
 class RestToMcpAdapter:
@@ -129,7 +92,10 @@ class RestToMcpAdapter:
     def client(self) -> httpx.AsyncClient:
         """Lazy-initialize HTTP client."""
         if self._client is None:
-            self._client = httpx.AsyncClient(base_url=self.base_url, timeout=30.0)
+            self._client = httpx.AsyncClient(
+                base_url=self.base_url,
+                timeout=HTTP_TIMEOUT_SECONDS,
+            )
         return self._client
 
     async def close(self) -> None:
@@ -159,31 +125,11 @@ class RestToMcpAdapter:
             )
 
         endpoint = self.endpoints[name]
-
-        # Build URL with path parameters
-        path = endpoint.path
-        for param in endpoint.path_params or []:
-            if param in arguments:
-                path = path.replace(f"{{{param}}}", str(arguments[param]))
-
-        # Build query parameters
-        query_params = {}
-        for param in endpoint.query_params or []:
-            if param in arguments:
-                query_params[param] = arguments[param]
-
-        # Build request body
-        body = None
-        if endpoint.body_params:
-            body = {k: arguments[k] for k in endpoint.body_params if k in arguments}
+        url = self._build_url(endpoint, arguments)
+        query_params = self._build_query_params(endpoint, arguments)
+        body = self._build_body(endpoint, arguments)
 
         try:
-            # Use endpoint-specific base_url if provided (multi-API support)
-            if endpoint.base_url:
-                url = endpoint.base_url.rstrip("/") + path
-            else:
-                url = path  # Relative to adapter's base_url
-
             response = await self.client.request(
                 method=endpoint.method.value,
                 url=url,
@@ -191,11 +137,10 @@ class RestToMcpAdapter:
                 json=body,
             )
 
-            # Transform response to MCP content
             content = self._response_to_content(response)
             return ToolCallResult(
                 content=content,
-                isError=response.status_code >= 400,
+                isError=response.status_code >= HTTP_ERROR_THRESHOLD,
             )
 
         except httpx.HTTPError as e:
@@ -204,11 +149,40 @@ class RestToMcpAdapter:
                 isError=True,
             )
 
+    def _build_url(self, endpoint: RestEndpoint, arguments: dict[str, Any]) -> str:
+        """Build URL with path parameters substituted."""
+        path = endpoint.path
+        for param in endpoint.path_params or []:
+            if param in arguments:
+                path = path.replace(f"{{{param}}}", str(arguments[param]))
+
+        # Use endpoint-specific base_url if provided (multi-API support)
+        if endpoint.base_url:
+            return endpoint.base_url.rstrip("/") + path
+        return path  # Relative to adapter's base_url
+
+    def _build_query_params(
+        self, endpoint: RestEndpoint, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Build query parameters from arguments."""
+        query_params = {}
+        for param in endpoint.query_params or []:
+            if param in arguments:
+                query_params[param] = arguments[param]
+        return query_params
+
+    def _build_body(
+        self, endpoint: RestEndpoint, arguments: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Build request body from arguments."""
+        if not endpoint.body_params:
+            return None
+        return {k: arguments[k] for k in endpoint.body_params if k in arguments}
+
     def _response_to_content(self, response: httpx.Response) -> list[ContentBlock]:
         """Convert HTTP response to MCP content blocks."""
         try:
             data = response.json()
-            # Pretty-print JSON for readability
             text = json.dumps(data, indent=2)
         except json.JSONDecodeError:
             text = response.text
@@ -238,24 +212,7 @@ class RestToMcpAdapter:
                 return make_success_response(request.id, list_result.model_dump())
 
             case "tools/call":
-                if request.params is None:
-                    return make_error_response(
-                        request.id,
-                        ErrorCode.INVALID_PARAMS,
-                        "Missing params for tools/call",
-                    )
-
-                try:
-                    params = ToolCallParams(**request.params)
-                except Exception as e:
-                    return make_error_response(
-                        request.id,
-                        ErrorCode.INVALID_PARAMS,
-                        f"Invalid params: {e}",
-                    )
-
-                call_result = await self.call_tool(params.name, params.arguments)
-                return make_success_response(request.id, call_result.model_dump())
+                return await self._handle_tools_call(request)
 
             case _:
                 return make_error_response(
@@ -264,105 +221,39 @@ class RestToMcpAdapter:
                     f"Unknown method: {request.method}",
                 )
 
+    async def _handle_tools_call(
+        self, request: JsonRpcRequest
+    ) -> JsonRpcResponse | JsonRpcErrorResponse:
+        """Handle tools/call method."""
+        if request.params is None:
+            return make_error_response(
+                request.id,
+                ErrorCode.INVALID_PARAMS,
+                "Missing params for tools/call",
+            )
 
-# -----------------------------------------------------------------------------
-# Open-Meteo Weather API endpoints (multi-API demonstration)
-# -----------------------------------------------------------------------------
+        try:
+            params = ToolCallParams(**request.params)
+        except Exception as e:
+            return make_error_response(
+                request.id,
+                ErrorCode.INVALID_PARAMS,
+                f"Invalid params: {e}",
+            )
 
-OPEN_METEO_BASE = "https://api.open-meteo.com"
-
-OPEN_METEO_ENDPOINTS = [
-    RestEndpoint(
-        name="get_weather",
-        path="/v1/forecast",
-        method=HttpMethod.GET,
-        description="Get current weather for coordinates. Returns temperature, wind speed, and conditions.",
-        query_params=["latitude", "longitude", "current_weather"],
-        base_url=OPEN_METEO_BASE,
-    ),
-    RestEndpoint(
-        name="get_forecast",
-        path="/v1/forecast",
-        method=HttpMethod.GET,
-        description="Get 7-day weather forecast for coordinates.",
-        query_params=["latitude", "longitude", "daily", "timezone"],
-        base_url=OPEN_METEO_BASE,
-    ),
-]
+        call_result = await self.call_tool(params.name, params.arguments)
+        return make_success_response(request.id, call_result.model_dump())
 
 
 # -----------------------------------------------------------------------------
-# JSONPlaceholder API endpoints
+# Factory Functions
 # -----------------------------------------------------------------------------
-
-JSONPLACEHOLDER_ENDPOINTS = [
-    RestEndpoint(
-        name="get_posts",
-        path="/posts",
-        method=HttpMethod.GET,
-        description="Get all posts. Optionally filter by userId.",
-        query_params=["userId"],
-    ),
-    RestEndpoint(
-        name="get_post",
-        path="/posts/{id}",
-        method=HttpMethod.GET,
-        description="Get a specific post by ID.",
-        path_params=["id"],
-    ),
-    RestEndpoint(
-        name="create_post",
-        path="/posts",
-        method=HttpMethod.POST,
-        description="Create a new post with title, body, and userId.",
-        body_params=["title", "body", "userId"],
-    ),
-    RestEndpoint(
-        name="update_post",
-        path="/posts/{id}",
-        method=HttpMethod.PUT,
-        description="Update an existing post.",
-        path_params=["id"],
-        body_params=["title", "body", "userId"],
-    ),
-    RestEndpoint(
-        name="delete_post",
-        path="/posts/{id}",
-        method=HttpMethod.DELETE,
-        description="Delete a post by ID.",
-        path_params=["id"],
-    ),
-    RestEndpoint(
-        name="get_comments",
-        path="/posts/{postId}/comments",
-        method=HttpMethod.GET,
-        description="Get all comments for a specific post.",
-        path_params=["postId"],
-    ),
-    RestEndpoint(
-        name="get_users",
-        path="/users",
-        method=HttpMethod.GET,
-        description="Get all users.",
-    ),
-    RestEndpoint(
-        name="get_user",
-        path="/users/{id}",
-        method=HttpMethod.GET,
-        description="Get a specific user by ID.",
-        path_params=["id"],
-    ),
-]
-
-
-# Combined endpoints for multi-API demonstration
-DEFAULT_ENDPOINTS = JSONPLACEHOLDER_ENDPOINTS + OPEN_METEO_ENDPOINTS
 
 
 def create_jsonplaceholder_adapter() -> RestToMcpAdapter:
     """Create an adapter pre-configured for JSONPlaceholder API."""
     return RestToMcpAdapter(
-        base_url="https://jsonplaceholder.typicode.com",
+        base_url=JSONPLACEHOLDER_BASE_URL,
         endpoints=JSONPLACEHOLDER_ENDPOINTS,
     )
 
@@ -375,6 +266,6 @@ def create_multi_api_adapter() -> RestToMcpAdapter:
     vast portfolio of existing APIs into the AI agent ecosystem.
     """
     return RestToMcpAdapter(
-        base_url="https://jsonplaceholder.typicode.com",  # Default for relative paths
+        base_url=JSONPLACEHOLDER_BASE_URL,  # Default for relative paths
         endpoints=DEFAULT_ENDPOINTS,
     )
