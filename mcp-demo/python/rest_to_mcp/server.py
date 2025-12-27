@@ -2,14 +2,16 @@
 MCP Server
 
 FastAPI application exposing the REST-to-MCP adapter as an MCP-compliant server.
-Handles JSON-RPC 2.0 over HTTP POST, which is one of the transports MCP supports.
 
-In production ContextForge, this would also support:
-- SSE (Server-Sent Events) for streaming
-- WebSocket for bidirectional communication
-- stdio for CLI integration
+THE GOLDEN PATH (single execution flow):
+    POST /mcp
+      → server.mcp_endpoint()
+        → adapter.handle_request()
+          → method handler (initialize | tools/list | tools/call)
+            → response + sealed context
 
-This demo focuses on HTTP for simplicity.
+All MCP clients MUST use POST /mcp with JSON-RPC 2.0 messages.
+Other endpoints (/health, /tools) exist for debugging only.
 """
 
 from collections.abc import AsyncGenerator
@@ -65,10 +67,15 @@ app.mount("/static", get_static_files(), name="static")
 @app.post("/mcp")
 async def mcp_endpoint(request: Request) -> JSONResponse:
     """
-    Main MCP endpoint accepting JSON-RPC 2.0 requests.
+    THE SINGLE ENTRY POINT for all MCP operations.
 
-    This is where MCP clients (like LLM agents) send their requests.
-    The adapter handles routing to the appropriate method handler.
+    This is the golden path. All MCP clients send JSON-RPC 2.0 requests here.
+    The adapter routes to the appropriate handler and returns a sealed context.
+
+    Supported methods:
+    - initialize: Handshake and capability discovery
+    - tools/list: Enumerate available tools
+    - tools/call: Execute a tool
     """
     if adapter is None:
         raise HTTPException(status_code=503, detail="Adapter not initialized")
@@ -103,13 +110,25 @@ async def health() -> dict[str, str]:
     return {"status": "healthy"}
 
 
+# -----------------------------------------------------------------------------
+# Debug Endpoints (NOT part of golden path)
+# -----------------------------------------------------------------------------
+
+
 @app.get("/tools")
 async def list_tools() -> dict[str, Any]:
     """
-    Convenience endpoint to list available tools.
+    DEBUG ONLY: List available tools as plain JSON.
 
-    Not part of MCP spec - just useful for debugging and exploration.
-    In production, use the MCP tools/list method instead.
+    WARNING: This endpoint bypasses the MCP protocol.
+    MCP clients MUST use POST /mcp with method="tools/list" instead.
+
+    This exists only for:
+    - Manual debugging in browser
+    - Quick verification during development
+    - Integration test setup
+
+    Do NOT use in production MCP integrations.
     """
     if adapter is None:
         raise HTTPException(status_code=503, detail="Adapter not initialized")
