@@ -461,62 +461,36 @@ class ExecutionContext:
             )
 
     # -------------------------------------------------------------------------
-    # Context Boundaries (size tracking and reduction)
+    # Context Boundary (THE point where accumulated data is destroyed)
     # -------------------------------------------------------------------------
 
-    def context_size(self) -> int:
+    def discard_results(self) -> "ExecutionContext":
         """
-        Return approximate size of accumulated context in characters.
+        DESTROY all accumulated results. Returns context with empty results.
 
-        WHY THIS EXISTS:
-        Context growth must be visible. This method makes it possible to
-        monitor, log, and enforce size limits. Unbounded context leads to
-        unpredictable behavior.
+        THIS IS THE CONTEXT BOUNDARY.
 
-        Returns character count of serialized results (rough approximation).
+        WHY THIS LOSS IS NECESSARY:
+        Accumulated tool results contain unbounded data from external sources.
+        Downstream code (other tools, external systems) must not see this data.
+        If they need specific information, it must be extracted BEFORE this
+        boundary and passed explicitly. There is no way to recover discarded
+        results. This is intentional.
+
+        This method exists to make context reduction:
+        - Visible (you see it in the orchestration flow)
+        - Mandatory (there is no "keep some" option)
+        - Irreversible (data is destroyed, not hidden)
         """
-        if not self._results:
-            return 0
-        # Approximate size: sum of string representations of results
-        return sum(len(str(r.content)) for r in self._results)
-
-    def result_count(self) -> int:
-        """Return number of accumulated results."""
-        return len(self._results)
-
-    def with_reduced_results(self, max_results: int = 1) -> "ExecutionContext":
-        """
-        Return new context with only the most recent results kept.
-
-        WHY THIS EXISTS:
-        Context reduction is how we prevent unbounded growth. This method
-        makes reduction EXPLICIT and VISIBLE rather than implicit.
-
-        CONTEXT BOUNDARY: This is a deliberate reduction point.
-        Call this between orchestration steps when full history isn't needed.
-
-        Args:
-            max_results: Keep only this many most recent results (default: 1)
-
-        Returns:
-            New context with reduced results (original unchanged)
-        """
-        self._check_not_sealed("with_reduced_results")
-
-        if max_results < 0:
-            raise ContextError("max_results must be non-negative")
-
-        # Keep only the most recent results
-        kept_results = self._results[-max_results:] if max_results > 0 else ()
+        self._check_not_sealed("discard_results")
 
         new_ctx = ExecutionContext(
             self._request_id, self._method, _trust_caller=True
         )
         new_ctx._tool_name = self._tool_name
         new_ctx._arguments = dict(self._arguments)
-        new_ctx._results = kept_results
+        new_ctx._results = ()  # DESTROYED. No configuration. No recovery.
         new_ctx._created_at = self._created_at
-        # Note: _sealed intentionally not copied (see with_tool_call comment)
         return new_ctx
 
     # -------------------------------------------------------------------------
@@ -526,9 +500,8 @@ class ExecutionContext:
     def __repr__(self) -> str:
         sealed_marker = " SEALED" if self._sealed else ""
         tool_info = f" tool={self._tool_name}" if self._tool_name else ""
-        size_info = f" size={self.context_size()}" if self._results else ""
+        result_info = f" results={len(self._results)}" if self._results else ""
         return (
             f"<ExecutionContext id={self._request_id} "
-            f"method={self._method}{tool_info} "
-            f"results={len(self._results)}{size_info}{sealed_marker}>"
+            f"method={self._method}{tool_info}{result_info}{sealed_marker}>"
         )
