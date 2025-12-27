@@ -35,7 +35,10 @@
       "Bash(.venvScriptspython.exe:*)",
       "Bash(.venv/Scripts/activate)",
       "Bash(uvicorn:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)",
+      "Bash(\"C:/Users/roger/Documents/GitHub/MCP-Demo/MCP-Demo/mcp-demo/python/.venv/Scripts/python.exe\" -m uvicorn:*)"
     ],
     "deny": [],
     "ask": []

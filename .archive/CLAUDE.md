@@ -1,121 +1,127 @@
-# CLAUDE.md
+# Claude Instructions — MCP-Demo
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This repository is a **conceptual demonstration**, not a framework.
 
-## Project Overview
+Claude is used as an implementation assistant under **strict constraints**.
 
-MCP-Demo is a portfolio project demonstrating REST-to-MCP protocol translation. It consists of two components:
-1. **Python REST-to-MCP Adapter** (`mcp-demo/python/`) - FastAPI server translating REST APIs into MCP tool interfaces
-2. **Rust MCP Parser** (`mcp-demo/rust/mcp_parser/`) - High-performance JSON-RPC 2.0 parser with PyO3 Python bindings
+If a suggestion violates the intent described here, it should be rejected.
 
-## Build & Development Commands
+---
 
-### Python Adapter
-```bash
-cd mcp-demo/python
-python -m venv .venv && .venv\Scripts\activate  # Windows
-pip install -e ".[dev]"
+## Primary Goal
 
-# Run tests (40 pass, 9 skipped for network-dependent)
-pytest
+Refactor and maintain this repository so that:
 
-# Run single test file
-pytest tests/test_adapter.py -v
+- Context flow is explicit and traceable
+- Orchestration decisions are deliberate and readable
+- Boundaries between AI, tools, and orchestration are obvious
+- Replacing the domain requires changing only a small adapter layer
 
-# Run server
-uvicorn rest_to_mcp.server:app --reload
+Clarity and intent take precedence over flexibility or reuse.
 
-# Linting and type checking
-ruff check .
-mypy rest_to_mcp
-```
+---
 
-### Rust Parser
-```bash
-cd mcp-demo/rust/mcp_parser
+## Non-Goals (Hard Constraints)
 
-# Build and test
-cargo build --release
-cargo test
+Claude must **not**:
 
-# Run benchmarks
-cargo bench
+- Introduce plugin systems
+- Add configuration layers
+- Generalize for arbitrary domains
+- Create reusable libraries
+- Add abstraction “just in case”
+- Optimize for scalability or production readiness
+- Mirror or reproduce proprietary ContextForge APIs or naming
 
-# Build Python bindings (requires maturin)
-pip install maturin
-maturin develop --release
-```
+If something appears “too flexible” or “framework-like”, it is likely incorrect.
 
-### Integration Testing
-```bash
-cd mcp-demo/python
-pytest tests/test_integration.py -v
-```
+---
 
-## Architecture
+## Design Philosophy
 
-```
-MCP Client (LLM Agent) ──> REST-to-MCP Adapter (Python) ──> REST API (JSONPlaceholder)
-                                    │
-                                    ▼
-                            Rust Parser (PyO3 bindings)
-```
+- One canonical context object
+- One explicit orchestration flow (“golden path”)
+- Tools are system components, not magic
+- Context growth is intentional
+- Context reduction is explicit
+- Failure modes are visible
 
-### Python Adapter (`mcp-demo/python/rest_to_mcp/`)
-- `models.py` - Pydantic schemas for MCP JSON-RPC messages
-- `adapter.py` - REST-to-MCP translation logic, tool discovery from OpenAPI specs
-- `server.py` - FastAPI ASGI server exposing MCP endpoint
-- `dashboard.py` - Demo UI routes and WebSocket test runner
+Deletion of code is encouraged if it improves clarity.
 
-### Dashboard UI (`mcp-demo/python/rest_to_mcp/static/`, `templates/`)
-- Interactive MCP request tester with example payloads
-- Documentation explaining core MCP concepts and architecture
-- Live test runner streaming pytest output via WebSocket
-- Run server and visit http://localhost:8000/ to access
+---
 
-### Rust Parser (`mcp-demo/rust/mcp_parser/src/lib.rs`)
-- JSON-RPC 2.0 request/response parsing with serde_json
-- PyO3 bindings exposing `parse_request()`, `parse_response()`, `is_valid()`, `parse_requests_batch()`
-- Validates JSON-RPC version, required fields, ID types, and params structure
+## Refactoring Strategy
 
-## Key Dependencies
-- Python 3.11+, FastAPI, Pydantic 2.5+, httpx, uvicorn, Jinja2, websockets
-- Rust 1.70+, PyO3 0.22, serde, maturin for Python wheel builds
-- Alpine.js (CDN) for dashboard interactivity - no build step required
+All changes must be broken into **small, reviewable pull requests**.
 
-## Testing
-- Unit tests for models and adapter components
-- Integration tests hit live JSONPlaceholder API (no mocks for cheap real calls)
-- Rust side uses property-based tests for parser edge cases
-- pytest configured with asyncio_mode="auto" and coverage reporting
+Each pull request should:
+- Change one conceptual thing
+- Be understandable in isolation
+- Include a brief rationale
+- Minimize surface-area changes
+- Prefer removing code over adding abstraction
 
-## Code Standards & Behavior Rules
+---
 
-### Communication Style
-- No sycophancy - be direct, objective, and technically honest
-- Question requirements when they seem incomplete, contradictory, or suboptimal
-- Rubber-duck reasoning for complex logic before implementing
+## Required Pull Request Sequence
 
-### Before Writing Code
-- Explain architectural decisions and trade-offs before implementing
-- Suggest better alternatives when a proposed approach is suboptimal
-- Use industry-standard patterns and explain why they're standard
+### PR 1 — Canonical Context Object
+- Identify and centralize the primary context structure
+- Remove implicit or ad-hoc context passing
+- Make context shape obvious and documented
 
-### While Working
-- Point out code smells and technical debt as you encounter them
-- Flag performance implications and security concerns proactively
-- Suggest refactors for existing code rather than just adding features
-- Call out when dependencies are overkill or outdated
+---
 
-### Code Quality
-- Write tests that catch real bugs: edge cases, error conditions, race conditions - not just happy paths
-- Explain regex, complex queries, and gnarly algorithms inline with comments
-- Never dump cryptic code without explanation
+### PR 2 — Single Golden Path
+- Identify the primary orchestration flow
+- Remove or collapse alternative execution paths
+- Ensure execution can be followed top-to-bottom
 
-### Token Efficiency
-- Be concise - avoid verbose explanations when brief ones suffice
-- Don't repeat file contents unnecessarily; reference by line numbers
-- Batch related operations into single tool calls where possible
-- Skip boilerplate commentary; focus on what's changed and why
-- Use diffs and targeted edits over full file rewrites
-- Omit obvious observations; state only what adds value
+---
+
+### PR 3 — Explicit Context Boundaries
+- Identify where context grows
+- Add at least one deliberate context reduction or summarization
+- Make boundary decisions explicit in code
+
+---
+
+### PR 4 — Constrained Tool Invocation
+- Replace generic “run tool” abstractions
+- Make tool assumptions explicit
+- Fail loudly when assumptions are violated
+
+---
+
+### PR 5 — Deliberate Failure Mode
+- Introduce one realistic failure scenario
+- Handle it explicitly
+- Avoid generic exception handling
+- Make tradeoffs visible
+
+---
+
+### PR 6 — Domain Adapter Isolation
+- Isolate domain-specific logic
+- Ensure swapping domains requires minimal change
+- Prefer simple, concrete adapters over abstractions
+
+---
+
+### PR 7 — Documentation Alignment
+- Ensure README reflects actual code structure
+- Add comments only where they explain intent
+- Remove comments that restate obvious behavior
+
+---
+
+## Final Instruction
+
+This repository should feel:
+
+- Opinionated
+- Constrained
+- Deliberate
+- Easy to reason about
+
+If a change exists only to make future changes easier, it should be rejected.
