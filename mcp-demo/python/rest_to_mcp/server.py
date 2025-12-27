@@ -91,8 +91,9 @@ async def mcp_endpoint(request: Request) -> JSONResponse:
         )
         return JSONResponse(content=error.model_dump(), status_code=200)
 
-    # Handle the request
-    response = await adapter.handle_request(rpc_request)
+    # Handle the request (returns response + context for traceability)
+    response, _context = await adapter.handle_request(rpc_request)
+    # Note: context is available here for logging/debugging if needed
     return JSONResponse(content=response.model_dump(), status_code=200)
 
 

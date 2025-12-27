@@ -304,7 +304,7 @@ async def websocket_playground(websocket: WebSocket) -> None:
                     # Special case: tools/list
                     from .models import JsonRpcRequest
                     request = JsonRpcRequest(id=1, method="tools/list", params={})
-                    response = await _adapter.handle_request(request)
+                    response, _ctx = await _adapter.handle_request(request)
                     tool_result = response.result if hasattr(response, "result") else {}
                     parsed_data = tool_result
                 else:

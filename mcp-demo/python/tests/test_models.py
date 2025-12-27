@@ -9,12 +9,15 @@ import pytest
 from pydantic import ValidationError
 
 from rest_to_mcp.models import (
+    ContextError,
     ErrorCode,
+    ExecutionContext,
     JsonRpcErrorResponse,
     JsonRpcRequest,
     JsonRpcResponse,
     TextContent,
     Tool,
+    ToolCallResult,
     ToolInputSchema,
     make_error_response,
     make_success_response,
@@ -142,3 +145,236 @@ class TestToolModels:
         content = TextContent(text="Hello, world!")
         assert content.type == "text"
         assert content.text == "Hello, world!"
+
+
+class TestExecutionContext:
+    """
+    Tests for the canonical ExecutionContext.
+
+    These tests verify that ExecutionContext enforces its invariants
+    and fails loudly when misused.
+    """
+
+    # -------------------------------------------------------------------------
+    # Invariant 1: Direct construction is forbidden
+    # -------------------------------------------------------------------------
+
+    def test_direct_construction_forbidden(self):
+        """Direct construction must raise ContextError."""
+        with pytest.raises(ContextError) as exc_info:
+            ExecutionContext(1, "test")
+
+        assert "from_request()" in str(exc_info.value)
+
+    # -------------------------------------------------------------------------
+    # Invariant 2: request_id must be non-empty
+    # -------------------------------------------------------------------------
+
+    def test_from_request_rejects_empty_string_id(self):
+        """Empty string request_id must be rejected."""
+        request = JsonRpcRequest(id="   ", method="test")
+
+        with pytest.raises(ContextError) as exc_info:
+            ExecutionContext.from_request(request)
+
+        assert "request.id is empty" in str(exc_info.value)
+
+    # -------------------------------------------------------------------------
+    # Invariant 3: method must be non-empty
+    # -------------------------------------------------------------------------
+
+    def test_from_request_rejects_empty_method(self):
+        """Empty method must be rejected."""
+        request = JsonRpcRequest(id=1, method="")
+
+        with pytest.raises(ContextError) as exc_info:
+            ExecutionContext.from_request(request)
+
+        assert "method is empty" in str(exc_info.value)
+
+    def test_from_request_rejects_whitespace_method(self):
+        """Whitespace-only method must be rejected."""
+        request = JsonRpcRequest(id=1, method="   ")
+
+        with pytest.raises(ContextError) as exc_info:
+            ExecutionContext.from_request(request)
+
+        assert "method is empty" in str(exc_info.value)
+
+    # -------------------------------------------------------------------------
+    # Valid creation path
+    # -------------------------------------------------------------------------
+
+    def test_from_request_valid(self):
+        """Valid request creates context correctly."""
+        request = JsonRpcRequest(id=42, method="tools/call")
+        context = ExecutionContext.from_request(request)
+
+        assert context.request_id == 42
+        assert context.method == "tools/call"
+        assert context.tool_name is None
+        assert context.arguments == {}
+        assert context.results == ()
+        assert context.is_sealed is False
+
+    def test_from_request_string_id(self):
+        """String request IDs are valid."""
+        request = JsonRpcRequest(id="req-123", method="initialize")
+        context = ExecutionContext.from_request(request)
+
+        assert context.request_id == "req-123"
+
+    def test_created_at_is_utc(self):
+        """created_at must use UTC timezone."""
+        from datetime import timezone
+
+        request = JsonRpcRequest(id=1, method="test")
+        context = ExecutionContext.from_request(request)
+
+        assert context.created_at.tzinfo == timezone.utc
+
+    # -------------------------------------------------------------------------
+    # Invariant 4: tool_name cannot be rebound
+    # -------------------------------------------------------------------------
+
+    def test_with_tool_call_rejects_rebinding(self):
+        """Once tool_name is set, it cannot be changed."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request)
+        context = context.with_tool_call("get_user", {"id": "1"})
+
+        with pytest.raises(ContextError) as exc_info:
+            context.with_tool_call("get_posts", {})
+
+        assert "already bound" in str(exc_info.value)
+        assert "get_user" in str(exc_info.value)
+
+    def test_with_tool_call_rejects_empty_name(self):
+        """Empty tool name must be rejected."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request)
+
+        with pytest.raises(ContextError) as exc_info:
+            context.with_tool_call("", {})
+
+        assert "name is empty" in str(exc_info.value)
+
+    # -------------------------------------------------------------------------
+    # Invariant 5: results require tool_name
+    # -------------------------------------------------------------------------
+
+    def test_with_result_requires_tool_name(self):
+        """Cannot add results without tool_name being set first."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request)
+        result = ToolCallResult(content=[TextContent(text="data")])
+
+        with pytest.raises(ContextError) as exc_info:
+            context.with_result(result)
+
+        assert "no tool_name set" in str(exc_info.value)
+
+    def test_with_result_rejects_none(self):
+        """Cannot add None as result."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request).with_tool_call("test", {})
+
+        with pytest.raises(ContextError) as exc_info:
+            context.with_result(None)
+
+        assert "result is None" in str(exc_info.value)
+
+    # -------------------------------------------------------------------------
+    # Invariant 6: sealed context cannot be mutated
+    # -------------------------------------------------------------------------
+
+    def test_sealed_context_rejects_with_tool_call(self):
+        """Sealed context cannot accept with_tool_call."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request).seal()
+
+        with pytest.raises(ContextError) as exc_info:
+            context.with_tool_call("test", {})
+
+        assert "sealed" in str(exc_info.value)
+
+    def test_sealed_context_rejects_with_result(self):
+        """Sealed context cannot accept with_result."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request)
+        context = context.with_tool_call("test", {}).seal()
+        result = ToolCallResult(content=[TextContent(text="data")])
+
+        with pytest.raises(ContextError) as exc_info:
+            context.with_result(result)
+
+        assert "sealed" in str(exc_info.value)
+
+    # -------------------------------------------------------------------------
+    # Immutability of mutation methods
+    # -------------------------------------------------------------------------
+
+    def test_with_tool_call_returns_new_context(self):
+        """with_tool_call must return a new instance."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        original = ExecutionContext.from_request(request)
+        updated = original.with_tool_call("get_user", {"id": "5"})
+
+        # Original unchanged
+        assert original.tool_name is None
+        assert original.arguments == {}
+
+        # New context has updates
+        assert updated.tool_name == "get_user"
+        assert updated.arguments == {"id": "5"}
+
+        # Different objects
+        assert original is not updated
+
+    def test_with_result_returns_new_context(self):
+        """with_result must return a new instance."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request).with_tool_call("test", {})
+        result = ToolCallResult(content=[TextContent(text="data")])
+
+        updated = context.with_result(result)
+
+        assert len(context.results) == 0
+        assert len(updated.results) == 1
+        assert context is not updated
+
+    # -------------------------------------------------------------------------
+    # Defensive copying
+    # -------------------------------------------------------------------------
+
+    def test_arguments_returns_copy(self):
+        """arguments property must return a copy to prevent mutation."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request)
+        context = context.with_tool_call("test", {"key": "value"})
+
+        args = context.arguments
+        args["key"] = "modified"
+
+        # Original should be unchanged
+        assert context.arguments["key"] == "value"
+
+    # -------------------------------------------------------------------------
+    # Repr for debugging
+    # -------------------------------------------------------------------------
+
+    def test_repr_unsealed(self):
+        """Repr shows context state clearly."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request)
+
+        assert "id=1" in repr(context)
+        assert "method=tools/call" in repr(context)
+        assert "SEALED" not in repr(context)
+
+    def test_repr_sealed(self):
+        """Repr shows sealed state."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request).seal()
+
+        assert "SEALED" in repr(context)

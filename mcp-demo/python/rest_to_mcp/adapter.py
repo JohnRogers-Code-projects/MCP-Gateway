@@ -30,7 +30,9 @@ from .endpoints import (
 )
 from .models import (
     ContentBlock,
+    ContextError,
     ErrorCode,
+    ExecutionContext,
     InitializeResult,
     JsonRpcErrorResponse,
     JsonRpcRequest,
@@ -191,7 +193,7 @@ class RestToMcpAdapter:
 
     async def handle_request(
         self, request: JsonRpcRequest
-    ) -> JsonRpcResponse | JsonRpcErrorResponse:
+    ) -> tuple[JsonRpcResponse | JsonRpcErrorResponse, ExecutionContext]:
         """
         Main entry point for handling MCP JSON-RPC requests.
 
@@ -199,50 +201,70 @@ class RestToMcpAdapter:
         - initialize: Return server capabilities
         - tools/list: Return available tools
         - tools/call: Execute a tool
+
+        Returns both the response and the execution context for traceability.
         """
+        # Create canonical context at entry point
+        context = ExecutionContext.from_request(request)
+
         match request.method:
             case "initialize":
-                return make_success_response(
+                response = make_success_response(
                     request.id,
                     InitializeResult().model_dump(),
                 )
+                return response, context.seal()
 
             case "tools/list":
                 list_result = ListToolsResult(tools=self.list_tools())
-                return make_success_response(request.id, list_result.model_dump())
+                response = make_success_response(request.id, list_result.model_dump())
+                return response, context.seal()
 
             case "tools/call":
-                return await self._handle_tools_call(request)
+                response, context = await self._handle_tools_call(request, context)
+                return response, context.seal()
 
             case _:
-                return make_error_response(
+                response = make_error_response(
                     request.id,
                     ErrorCode.METHOD_NOT_FOUND,
                     f"Unknown method: {request.method}",
                 )
+                return response, context.seal()
 
     async def _handle_tools_call(
-        self, request: JsonRpcRequest
-    ) -> JsonRpcResponse | JsonRpcErrorResponse:
-        """Handle tools/call method."""
+        self, request: JsonRpcRequest, context: ExecutionContext
+    ) -> tuple[JsonRpcResponse | JsonRpcErrorResponse, ExecutionContext]:
+        """Handle tools/call method with context tracking."""
         if request.params is None:
-            return make_error_response(
+            response = make_error_response(
                 request.id,
                 ErrorCode.INVALID_PARAMS,
                 "Missing params for tools/call",
             )
+            return response, context
 
         try:
             params = ToolCallParams(**request.params)
         except Exception as e:
-            return make_error_response(
+            response = make_error_response(
                 request.id,
                 ErrorCode.INVALID_PARAMS,
                 f"Invalid params: {e}",
             )
+            return response, context
 
+        # Update context with tool call information (immutable)
+        context = context.with_tool_call(params.name, params.arguments)
+
+        # Execute the tool
         call_result = await self.call_tool(params.name, params.arguments)
-        return make_success_response(request.id, call_result.model_dump())
+
+        # Record result in context (immutable)
+        context = context.with_result(call_result)
+
+        response = make_success_response(request.id, call_result.model_dump())
+        return response, context
 
 
 # -----------------------------------------------------------------------------
