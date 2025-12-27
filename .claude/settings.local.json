@@ -38,7 +38,13 @@
       "Bash(wc:*)",
       "Bash(tasklist:*)",
       "Bash(findstr:*)",
-      "Bash(\"C:/Users/roger/Documents/GitHub/MCP-Demo/MCP-Demo/mcp-demo/python/.venv/Scripts/python.exe\" -m uvicorn:*)"
+      "Bash(\"C:/Users/roger/Documents/GitHub/MCP-Demo/MCP-Demo/mcp-demo/python/.venv/Scripts/python.exe\" -m uvicorn:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh api:*)"
     ],
     "deny": [],
     "ask": []

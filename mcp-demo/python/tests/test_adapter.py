@@ -203,23 +203,28 @@ class TestRestToMcpAdapter:
     async def test_handle_request_initialize(self, mock_adapter):
         adapter, _ = mock_adapter
         request = JsonRpcRequest(id=1, method="initialize")
-        
-        response = await adapter.handle_request(request)
-        
+
+        response, context = await adapter.handle_request(request)
+
         assert response.id == 1
         assert "protocolVersion" in response.result
         assert "capabilities" in response.result
+        assert context.request_id == 1
+        assert context.method == "initialize"
+        assert context.is_sealed  # Context must be sealed on return
 
     @pytest.mark.asyncio
     async def test_handle_request_tools_list(self, mock_adapter):
         adapter, _ = mock_adapter
         request = JsonRpcRequest(id=2, method="tools/list")
-        
-        response = await adapter.handle_request(request)
-        
+
+        response, context = await adapter.handle_request(request)
+
         assert response.id == 2
         assert "tools" in response.result
         assert len(response.result["tools"]) == 3
+        assert context.method == "tools/list"
+        assert context.is_sealed  # Context must be sealed on return
 
     @pytest.mark.asyncio
     async def test_handle_request_tools_call(self, mock_adapter):
@@ -229,31 +234,37 @@ class TestRestToMcpAdapter:
             method="tools/call",
             params={"name": "get_items", "arguments": {}},
         )
-        
-        response = await adapter.handle_request(request)
-        
+
+        response, context = await adapter.handle_request(request)
+
         assert response.id == 3
         assert "content" in response.result
+        assert context.tool_name == "get_items"
+        assert len(context.results) == 1
+        assert context.is_sealed  # Context must be sealed on return
 
     @pytest.mark.asyncio
     async def test_handle_request_unknown_method(self, mock_adapter):
         adapter, _ = mock_adapter
         request = JsonRpcRequest(id=4, method="unknown/method")
-        
-        response = await adapter.handle_request(request)
-        
+
+        response, context = await adapter.handle_request(request)
+
         assert hasattr(response, "error")
         assert response.error.code == -32601  # METHOD_NOT_FOUND
+        assert context.method == "unknown/method"
+        assert context.is_sealed  # Context must be sealed even on error
 
     @pytest.mark.asyncio
     async def test_handle_request_missing_params(self, mock_adapter):
         adapter, _ = mock_adapter
         request = JsonRpcRequest(id=5, method="tools/call", params=None)
-        
-        response = await adapter.handle_request(request)
-        
+
+        response, context = await adapter.handle_request(request)
+
         assert hasattr(response, "error")
         assert response.error.code == -32602  # INVALID_PARAMS
+        assert context.is_sealed  # Context must be sealed even on error
 
 
 # -----------------------------------------------------------------------------
