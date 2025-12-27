@@ -269,7 +269,9 @@ class RestToMcpAdapter:
         # Execute the tool
         call_result = await self.call_tool(params.name, params.arguments)
 
-        # Record result in context (immutable)
+        # CONTEXT GROWTH: Result is appended to context here.
+        # Each tool call adds to accumulated context size.
+        # For multi-step orchestration, consider context reduction between steps.
         context = context.with_result(call_result)
 
         response = make_success_response(request.id, call_result.model_dump())

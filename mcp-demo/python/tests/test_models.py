@@ -378,3 +378,117 @@ class TestExecutionContext:
         context = ExecutionContext.from_request(request).seal()
 
         assert "SEALED" in repr(context)
+
+    # -------------------------------------------------------------------------
+    # Context Boundaries
+    # -------------------------------------------------------------------------
+
+    def test_context_size_empty(self):
+        """Empty context has size 0."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request)
+
+        assert context.context_size() == 0
+
+    def test_context_size_with_results(self):
+        """Context size increases with results."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request).with_tool_call("test", {})
+
+        result1 = ToolCallResult(content=[TextContent(text="short")])
+        result2 = ToolCallResult(content=[TextContent(text="a longer result")])
+
+        ctx1 = context.with_result(result1)
+        ctx2 = ctx1.with_result(result2)
+
+        assert ctx1.context_size() > 0
+        assert ctx2.context_size() > ctx1.context_size()
+
+    def test_result_count(self):
+        """result_count returns number of results."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request).with_tool_call("test", {})
+
+        assert context.result_count() == 0
+
+        result = ToolCallResult(content=[TextContent(text="data")])
+        ctx1 = context.with_result(result)
+        ctx2 = ctx1.with_result(result)
+
+        assert ctx1.result_count() == 1
+        assert ctx2.result_count() == 2
+
+    def test_with_reduced_results_keeps_recent(self):
+        """with_reduced_results keeps only most recent results."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request).with_tool_call("test", {})
+
+        r1 = ToolCallResult(content=[TextContent(text="first")])
+        r2 = ToolCallResult(content=[TextContent(text="second")])
+        r3 = ToolCallResult(content=[TextContent(text="third")])
+
+        ctx = context.with_result(r1).with_result(r2).with_result(r3)
+        assert ctx.result_count() == 3
+
+        # Reduce to 1 (most recent)
+        reduced = ctx.with_reduced_results(1)
+        assert reduced.result_count() == 1
+        assert reduced.results[0].content[0].text == "third"
+
+    def test_with_reduced_results_keeps_multiple(self):
+        """with_reduced_results can keep multiple recent results."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request).with_tool_call("test", {})
+
+        r1 = ToolCallResult(content=[TextContent(text="first")])
+        r2 = ToolCallResult(content=[TextContent(text="second")])
+        r3 = ToolCallResult(content=[TextContent(text="third")])
+
+        ctx = context.with_result(r1).with_result(r2).with_result(r3)
+        reduced = ctx.with_reduced_results(2)
+
+        assert reduced.result_count() == 2
+        assert reduced.results[0].content[0].text == "second"
+        assert reduced.results[1].content[0].text == "third"
+
+    def test_with_reduced_results_zero_clears_all(self):
+        """with_reduced_results(0) removes all results."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request).with_tool_call("test", {})
+
+        result = ToolCallResult(content=[TextContent(text="data")])
+        ctx = context.with_result(result).with_result(result)
+
+        reduced = ctx.with_reduced_results(0)
+        assert reduced.result_count() == 0
+
+    def test_with_reduced_results_rejects_negative(self):
+        """with_reduced_results rejects negative max_results."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request).with_tool_call("test", {})
+
+        with pytest.raises(ContextError) as exc_info:
+            context.with_reduced_results(-1)
+
+        assert "non-negative" in str(exc_info.value)
+
+    def test_with_reduced_results_rejects_sealed(self):
+        """with_reduced_results rejects sealed context."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request).with_tool_call("test", {})
+        result = ToolCallResult(content=[TextContent(text="data")])
+        ctx = context.with_result(result).seal()
+
+        with pytest.raises(ContextError) as exc_info:
+            ctx.with_reduced_results(1)
+
+        assert "sealed" in str(exc_info.value)
+
+    def test_repr_shows_size(self):
+        """Repr includes context size when results exist."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request).with_tool_call("test", {})
+        result = ToolCallResult(content=[TextContent(text="data")])
+        ctx = context.with_result(result)
+
+        assert "size=" in repr(ctx)
