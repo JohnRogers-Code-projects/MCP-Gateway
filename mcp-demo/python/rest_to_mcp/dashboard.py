@@ -298,17 +298,21 @@ async def websocket_playground(websocket: WebSocket) -> None:
             args = substitute_args(step.args_template, captures, results)
 
             # Execute the tool
+            # NOTE: The playground simulates multi-step LLM orchestration internally.
+            # External MCP clients use the golden path (POST /mcp → handle_request).
+            # Here we call tools directly because we're simulating chained calls,
+            # not acting as an MCP client.
             parsed_data = {}
             try:
                 if step.tool == "__tools_list__":
-                    # Special case: tools/list
+                    # Use golden path for tools/list (proper MCP method)
                     from .models import JsonRpcRequest
                     request = JsonRpcRequest(id=1, method="tools/list", params={})
                     response, _ctx = await _adapter.handle_request(request)
                     tool_result = response.result if hasattr(response, "result") else {}
                     parsed_data = tool_result
                 else:
-                    # Normal tool call
+                    # Direct tool call for simulation (not external MCP request)
                     tool_result = await _adapter.call_tool(step.tool, args)
                     tool_result = tool_result.model_dump() if hasattr(tool_result, "model_dump") else tool_result
 

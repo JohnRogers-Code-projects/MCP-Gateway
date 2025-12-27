@@ -195,16 +195,25 @@ class RestToMcpAdapter:
         self, request: JsonRpcRequest
     ) -> tuple[JsonRpcResponse | JsonRpcErrorResponse, ExecutionContext]:
         """
-        Main entry point for handling MCP JSON-RPC requests.
+        THE GOLDEN PATH: Single entry point for all MCP operations.
 
-        Routes requests to the appropriate handler based on method:
-        - initialize: Return server capabilities
-        - tools/list: Return available tools
-        - tools/call: Execute a tool
+        All requests flow through here. There are no alternative paths.
 
-        Returns both the response and the execution context for traceability.
+        Flow:
+            handle_request()
+              → create ExecutionContext
+              → route by method
+              → seal context
+              → return (response, sealed_context)
+
+        Supported methods:
+            initialize  → server capabilities
+            tools/list  → available tools
+            tools/call  → execute tool (binds tool_name, records result)
+
+        Context is ALWAYS sealed before return. Callers receive immutable context.
         """
-        # Create canonical context at entry point
+        # Create canonical context at entry point (single creation path)
         context = ExecutionContext.from_request(request)
 
         match request.method:
