@@ -97,6 +97,39 @@ The intent is conceptual exploration, not replication.
 
 ---
 
+## Architecture Overview
+
+The Python implementation in `mcp-demo/python/` demonstrates these concepts:
+
+### Canonical Context Object
+
+Every request creates an `ExecutionContext` that flows through all operations:
+- Created via `from_request()` (single creation path)
+- Immutable mutations via `with_tool_call()` and `with_result()`
+- Sealed before returning to callers
+
+### Single Golden Path
+
+All MCP requests flow through one path:
+```
+POST /mcp → handle_request() → method handler → sealed response
+```
+
+### Orchestration vs Tool Separation
+
+- **Orchestration** (`_handle_tools_call`): Validates, guards, decides policy
+- **Tool Executor** (`call_tool`): Dumb HTTP executor, no intelligence
+
+### Domain Isolation
+
+Domain-specific endpoints are isolated in `domains/` package:
+- Add a domain: create one file, import in `endpoints.py`
+- Remove a domain: delete file, remove import
+
+See [`mcp-demo/python/ARCHITECTURE.md`](mcp-demo/python/ARCHITECTURE.md) for detailed technical documentation.
+
+---
+
 ## Why This Matters
 
 By making context boundaries explicit and orchestration deliberate, this demo highlights:
