@@ -307,12 +307,12 @@ class TestToolValidationError:
 
 class TestDestructiveOperationGuards:
     """
-    Tests for deliberate misuse checks on destructive operations.
+    Tests for orchestration-level guards on destructive operations.
 
-    INTENTIONALLY CONSTRAINED:
-    - Destructive operations have additional guards beyond schema validation
-    - Invalid IDs are rejected with clear, deliberate error messages
-    - There is no recovery, no retry, no workaround
+    ORCHESTRATION POLICY:
+    - Guards live in orchestration, not in tools
+    - Tools are dumb - they don't know they're being guarded
+    - Invalid operations are blocked before tool execution
     """
 
     @pytest.fixture
@@ -341,54 +341,83 @@ class TestDestructiveOperationGuards:
         return adapter
 
     @pytest.mark.asyncio
-    async def test_delete_post_rejects_zero_id(self, adapter_with_delete):
-        """delete_post with id=0 is rejected as deliberate misuse."""
-        with pytest.raises(ToolValidationError) as exc_info:
-            await adapter_with_delete.call_tool("delete_post", {"id": "0"})
+    async def test_orchestration_guards_delete_with_zero_id(self, adapter_with_delete):
+        """Orchestration rejects delete_post with id=0."""
+        request = JsonRpcRequest(
+            id=1,
+            method="tools/call",
+            params={"name": "delete_post", "arguments": {"id": "0"}},
+        )
 
-        assert "Destructive operation rejected" in str(exc_info.value)
-        assert "deliberate" in str(exc_info.value).lower()
+        response, _ = await adapter_with_delete.handle_request(request)
 
-    @pytest.mark.asyncio
-    async def test_delete_post_rejects_negative_id(self, adapter_with_delete):
-        """delete_post with negative id is rejected as deliberate misuse."""
-        with pytest.raises(ToolValidationError) as exc_info:
-            await adapter_with_delete.call_tool("delete_post", {"id": "-5"})
-
-        assert "Destructive operation rejected" in str(exc_info.value)
-        assert "positive integers" in str(exc_info.value)
+        assert hasattr(response, "error")
+        assert "Destructive operation rejected" in response.error.message
 
     @pytest.mark.asyncio
-    async def test_delete_post_rejects_non_numeric_id(self, adapter_with_delete):
-        """delete_post with non-numeric id is rejected as deliberate misuse."""
-        with pytest.raises(ToolValidationError) as exc_info:
-            await adapter_with_delete.call_tool("delete_post", {"id": "abc"})
+    async def test_orchestration_guards_delete_with_negative_id(self, adapter_with_delete):
+        """Orchestration rejects delete_post with negative id."""
+        request = JsonRpcRequest(
+            id=1,
+            method="tools/call",
+            params={"name": "delete_post", "arguments": {"id": "-5"}},
+        )
 
-        assert "Destructive operation rejected" in str(exc_info.value)
-        assert "not a valid integer" in str(exc_info.value)
+        response, _ = await adapter_with_delete.handle_request(request)
 
-    @pytest.mark.asyncio
-    async def test_update_post_rejects_zero_id(self, adapter_with_delete):
-        """update_post with id=0 is rejected as deliberate misuse."""
-        with pytest.raises(ToolValidationError) as exc_info:
-            await adapter_with_delete.call_tool(
-                "update_post",
-                {"id": "0", "title": "x", "body": "y", "userId": "1"},
-            )
-
-        assert "Destructive operation rejected" in str(exc_info.value)
+        assert hasattr(response, "error")
+        assert "Destructive operation rejected" in response.error.message
+        assert "positive integers" in response.error.message
 
     @pytest.mark.asyncio
-    async def test_update_post_rejects_non_numeric_id(self, adapter_with_delete):
-        """update_post with non-numeric id is rejected as deliberate misuse."""
-        with pytest.raises(ToolValidationError) as exc_info:
-            await adapter_with_delete.call_tool(
-                "update_post",
-                {"id": "not_a_number", "title": "x", "body": "y", "userId": "1"},
-            )
+    async def test_orchestration_guards_delete_with_non_numeric_id(self, adapter_with_delete):
+        """Orchestration rejects delete_post with non-numeric id."""
+        request = JsonRpcRequest(
+            id=1,
+            method="tools/call",
+            params={"name": "delete_post", "arguments": {"id": "abc"}},
+        )
 
-        assert "Destructive operation rejected" in str(exc_info.value)
-        assert "not a valid integer" in str(exc_info.value)
+        response, _ = await adapter_with_delete.handle_request(request)
+
+        assert hasattr(response, "error")
+        assert "Destructive operation rejected" in response.error.message
+        assert "not a valid integer" in response.error.message
+
+    @pytest.mark.asyncio
+    async def test_orchestration_guards_update_with_zero_id(self, adapter_with_delete):
+        """Orchestration rejects update_post with id=0."""
+        request = JsonRpcRequest(
+            id=1,
+            method="tools/call",
+            params={
+                "name": "update_post",
+                "arguments": {"id": "0", "title": "x", "body": "y", "userId": "1"},
+            },
+        )
+
+        response, _ = await adapter_with_delete.handle_request(request)
+
+        assert hasattr(response, "error")
+        assert "Destructive operation rejected" in response.error.message
+
+    @pytest.mark.asyncio
+    async def test_orchestration_guards_update_with_non_numeric_id(self, adapter_with_delete):
+        """Orchestration rejects update_post with non-numeric id."""
+        request = JsonRpcRequest(
+            id=1,
+            method="tools/call",
+            params={
+                "name": "update_post",
+                "arguments": {"id": "not_a_number", "title": "x", "body": "y", "userId": "1"},
+            },
+        )
+
+        response, _ = await adapter_with_delete.handle_request(request)
+
+        assert hasattr(response, "error")
+        assert "Destructive operation rejected" in response.error.message
+        assert "not a valid integer" in response.error.message
 
 
 # -----------------------------------------------------------------------------
@@ -553,31 +582,19 @@ class TestRestToMcpAdapter:
         assert context.is_sealed  # Context must be sealed even on error
 
     @pytest.mark.asyncio
-    async def test_call_tool_raises_validation_error(self, mock_adapter):
-        """call_tool must raise ToolValidationError for missing required params."""
+    async def test_call_tool_is_dumb_executor(self, mock_adapter):
+        """call_tool does NOT validate - it's a dumb executor."""
         adapter, _ = mock_adapter
 
-        with pytest.raises(ToolValidationError) as exc_info:
-            await adapter.call_tool("get_item", {})  # Missing required 'id'
-
-        assert exc_info.value.tool_name == "get_item"
-        assert len(exc_info.value.errors) == 1
-        assert "'id'" in exc_info.value.errors[0]
-
-    @pytest.mark.asyncio
-    async def test_call_tool_raises_validation_error_for_post(self, mock_adapter):
-        """call_tool must raise ToolValidationError for missing body params on POST."""
-        adapter, _ = mock_adapter
-
-        with pytest.raises(ToolValidationError) as exc_info:
-            await adapter.call_tool("create_item", {})  # Missing required 'name'
-
-        assert exc_info.value.tool_name == "create_item"
-        assert any("'name'" in e for e in exc_info.value.errors)
+        # call_tool with missing params does NOT raise - it just tries to execute
+        # Validation is orchestration's job, not the tool's job
+        result = await adapter.call_tool("get_items", {})
+        # It succeeds because get_items has no required params
+        assert not result.isError
 
     @pytest.mark.asyncio
-    async def test_handle_request_validation_error_response(self, mock_adapter):
-        """handle_request must return proper error for validation failures."""
+    async def test_handle_request_validates_at_orchestration_layer(self, mock_adapter):
+        """Validation happens in orchestration (handle_request), not in tool."""
         adapter, _ = mock_adapter
         request = JsonRpcRequest(
             id=6,
@@ -587,6 +604,7 @@ class TestRestToMcpAdapter:
 
         response, context = await adapter.handle_request(request)
 
+        # Orchestration caught the validation error
         assert hasattr(response, "error")
         assert response.error.code == -32602  # INVALID_PARAMS
         assert "get_item" in response.error.message

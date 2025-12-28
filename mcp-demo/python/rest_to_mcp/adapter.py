@@ -113,22 +113,19 @@ class RestToMcpAdapter:
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolCallResult:
         """
-        Execute a tool by calling the underlying REST endpoint.
+        Execute a tool. This is a DUMB executor.
 
-        CONSTRAINED INVOCATION:
-        - Tools receive ONLY declared parameters (unknown args rejected)
-        - Destructive operations have additional guards
-        - Validation happens BEFORE HTTP request is built
-        - Missing/invalid parameters raise ToolValidationError immediately
-        - There is no silent degradation, no retry, no recovery
+        THIS METHOD DOES NOT:
+        - Validate arguments (orchestration's job)
+        - Guard against misuse (orchestration's job)
+        - Make policy decisions (orchestration's job)
+        - Infer intent (orchestration's job)
 
-        Flow:
-        1. Look up endpoint (fail if unknown)
-        2. VALIDATE arguments (fail loudly if invalid)
-        3. GUARD destructive operations (deliberate misuse check)
-        4. Build HTTP request (params guaranteed valid after checks)
-        5. Make request
-        6. Transform response
+        It receives a tool name and arguments, makes the HTTP call,
+        and returns the result. That's all.
+
+        Orchestration (_handle_tools_call) decides WHAT to call.
+        This method only knows HOW to call.
         """
         if name not in self.endpoints:
             return ToolCallResult(
@@ -137,17 +134,6 @@ class RestToMcpAdapter:
             )
 
         endpoint = self.endpoints[name]
-
-        # VALIDATION GATE: Fail loudly if arguments are invalid
-        validation_errors = endpoint.validate_arguments(arguments)
-        if validation_errors:
-            raise ToolValidationError(name, validation_errors)
-
-        # DELIBERATE MISUSE CHECK: Guard destructive operations
-        # This demonstrates intentional constraint - certain operations
-        # have additional checks that cannot be bypassed
-        self._guard_destructive_operation(name, arguments)
-
         url = self._build_url(endpoint, arguments)
         query_params = self._build_query_params(endpoint, arguments)
         body = self._build_body(endpoint, arguments)
@@ -212,72 +198,6 @@ class RestToMcpAdapter:
 
         return [TextContent(text=text)]
 
-    def _guard_destructive_operation(
-        self, name: str, arguments: dict[str, Any]
-    ) -> None:
-        """
-        Guard against misuse of destructive operations.
-
-        DELIBERATE CONSTRAINT: Certain operations have additional checks
-        that go beyond schema validation. This is intentional.
-
-        WHY THIS EXISTS:
-        - Demonstrates that tools can be constrained beyond their schema
-        - Makes it obvious that destructive operations are guarded
-        - Fails LOUDLY with clear message explaining the constraint
-
-        This method does NOT:
-        - Retry on failure
-        - Recover silently
-        - Provide workarounds
-
-        Raises:
-            ToolValidationError: If the operation would be destructive misuse
-        """
-        # Guard delete_post: ID must be a positive integer
-        if name == "delete_post":
-            id_value = arguments.get("id", "")
-            try:
-                id_int = int(id_value)
-                if id_int <= 0:
-                    raise ToolValidationError(
-                        name,
-                        [
-                            f"Destructive operation rejected: id={id_value} is not a valid post ID. "
-                            "Post IDs must be positive integers. This constraint is deliberate."
-                        ],
-                    )
-            except (ValueError, TypeError):
-                raise ToolValidationError(
-                    name,
-                    [
-                        f"Destructive operation rejected: id={id_value!r} is not a valid integer. "
-                        "delete_post requires a numeric post ID. This constraint is deliberate."
-                    ],
-                )
-
-        # Guard update_post: ID must be a positive integer
-        if name == "update_post":
-            id_value = arguments.get("id", "")
-            try:
-                id_int = int(id_value)
-                if id_int <= 0:
-                    raise ToolValidationError(
-                        name,
-                        [
-                            f"Destructive operation rejected: id={id_value} is not a valid post ID. "
-                            "Post IDs must be positive integers. This constraint is deliberate."
-                        ],
-                    )
-            except (ValueError, TypeError):
-                raise ToolValidationError(
-                    name,
-                    [
-                        f"Destructive operation rejected: id={id_value!r} is not a valid integer. "
-                        "update_post requires a numeric post ID. This constraint is deliberate."
-                    ],
-                )
-
     async def handle_request(
         self, request: JsonRpcRequest
     ) -> tuple[JsonRpcResponse | JsonRpcErrorResponse, ExecutionContext]:
@@ -331,7 +251,16 @@ class RestToMcpAdapter:
     async def _handle_tools_call(
         self, request: JsonRpcRequest, context: ExecutionContext
     ) -> tuple[JsonRpcResponse | JsonRpcErrorResponse, ExecutionContext]:
-        """Handle tools/call method with context tracking."""
+        """
+        Handle tools/call method. ORCHESTRATION decides policy here.
+
+        This is where intelligence lives:
+        - Validate arguments against schema
+        - Guard destructive operations
+        - Decide whether to proceed
+
+        The tool (call_tool) is dumb. It just executes what we tell it.
+        """
         if request.params is None:
             response = make_error_response(
                 request.id,
@@ -353,27 +282,77 @@ class RestToMcpAdapter:
         # Update context with tool call information (immutable)
         context = context.with_tool_call(params.name, params.arguments)
 
-        # Execute the tool (may raise ToolValidationError)
-        try:
-            call_result = await self.call_tool(params.name, params.arguments)
-        except ToolValidationError as e:
-            # LOUD FAILURE: Validation errors are returned as proper errors
-            # not silently swallowed or partially executed
+        # ---------------------------------------------------------------------
+        # ORCHESTRATION POLICY: Validate before invoking tool
+        # ---------------------------------------------------------------------
+        if params.name not in self.endpoints:
             response = make_error_response(
                 request.id,
                 ErrorCode.INVALID_PARAMS,
-                str(e),
-                data={"tool": e.tool_name, "errors": e.errors},
+                f"Unknown tool: {params.name}",
             )
             return response, context
 
+        endpoint = self.endpoints[params.name]
+        validation_errors = endpoint.validate_arguments(params.arguments)
+        if validation_errors:
+            response = make_error_response(
+                request.id,
+                ErrorCode.INVALID_PARAMS,
+                f"Tool '{params.name}' validation failed: {'; '.join(validation_errors)}",
+                data={"tool": params.name, "errors": validation_errors},
+            )
+            return response, context
+
+        # ---------------------------------------------------------------------
+        # ORCHESTRATION POLICY: Guard destructive operations
+        # ---------------------------------------------------------------------
+        guard_error = self._check_destructive_operation(params.name, params.arguments)
+        if guard_error:
+            response = make_error_response(
+                request.id,
+                ErrorCode.INVALID_PARAMS,
+                guard_error,
+                data={"tool": params.name},
+            )
+            return response, context
+
+        # ---------------------------------------------------------------------
+        # Execute the tool (tool is dumb - just executes)
+        # ---------------------------------------------------------------------
+        call_result = await self.call_tool(params.name, params.arguments)
+
         # CONTEXT GROWTH: Result is appended to context here.
-        # Each tool call adds to accumulated context size.
-        # For multi-step orchestration, consider context reduction between steps.
         context = context.with_result(call_result)
 
         response = make_success_response(request.id, call_result.model_dump())
         return response, context
+
+    def _check_destructive_operation(
+        self, name: str, arguments: dict[str, Any]
+    ) -> str | None:
+        """
+        Check if a destructive operation should be blocked.
+
+        Returns error message if blocked, None if allowed.
+
+        This is ORCHESTRATION policy, not tool logic.
+        The tool doesn't know it's being guarded.
+        """
+        if name in ("delete_post", "update_post"):
+            id_value = arguments.get("id", "")
+            try:
+                id_int = int(id_value)
+                if id_int <= 0:
+                    return (
+                        f"Destructive operation rejected: id={id_value} is not valid. "
+                        "Post IDs must be positive integers."
+                    )
+            except (ValueError, TypeError):
+                return (
+                    f"Destructive operation rejected: id={id_value!r} is not a valid integer."
+                )
+        return None
 
 
 # -----------------------------------------------------------------------------
