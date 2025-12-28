@@ -260,6 +260,28 @@ class ToolValidationError(Exception):
         super().__init__(f"Tool '{tool_name}' validation failed: {'; '.join(errors)}")
 
 
+class ToolTimeoutError(Exception):
+    """
+    Raised when tool execution exceeds allowed time.
+
+    DELIBERATE FAILURE MODE: Timeouts are handled explicitly, not in a
+    generic catch-all. This makes the failure mode visible and allows
+    orchestration to decide how to respond.
+
+    Contains:
+    - tool_name: Which tool timed out
+    - timeout_seconds: How long we waited before giving up
+    """
+
+    def __init__(self, tool_name: str, timeout_seconds: float) -> None:
+        self.tool_name = tool_name
+        self.timeout_seconds = timeout_seconds
+        super().__init__(
+            f"Tool '{tool_name}' timed out after {timeout_seconds}s. "
+            "The external service did not respond in time."
+        )
+
+
 class ExecutionContext:
     """
     Canonical context object — the single source of truth for request state.

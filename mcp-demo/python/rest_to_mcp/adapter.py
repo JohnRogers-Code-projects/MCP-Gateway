@@ -42,6 +42,7 @@ from .models import (
     Tool,
     ToolCallParams,
     ToolCallResult,
+    ToolTimeoutError,
     ToolValidationError,
     make_error_response,
     make_success_response,
@@ -152,7 +153,19 @@ class RestToMcpAdapter:
                 isError=response.status_code >= HTTP_ERROR_THRESHOLD,
             )
 
+        # ---------------------------------------------------------------------
+        # DELIBERATE FAILURE MODES: Handle specific failures explicitly
+        # These are NOT hidden in a generic catch-all. Each failure mode
+        # is visible and can be handled differently by orchestration.
+        # ---------------------------------------------------------------------
+
+        except httpx.TimeoutException:
+            # TIMEOUT: External service did not respond in time
+            # Raise explicit exception so orchestration can decide response
+            raise ToolTimeoutError(name, HTTP_TIMEOUT_SECONDS)
+
         except httpx.HTTPError as e:
+            # OTHER HTTP ERRORS: Connection refused, DNS failure, etc.
             return ToolCallResult(
                 content=[TextContent(text=f"HTTP error: {e!s}")],
                 isError=True,
@@ -320,7 +333,22 @@ class RestToMcpAdapter:
         # ---------------------------------------------------------------------
         # Execute the tool (tool is dumb - just executes)
         # ---------------------------------------------------------------------
-        call_result = await self.call_tool(params.name, params.arguments)
+        try:
+            call_result = await self.call_tool(params.name, params.arguments)
+        except ToolTimeoutError as e:
+            # DELIBERATE FAILURE: Timeout is handled explicitly
+            # Context records the failure attempt (no result, but tool was called)
+            response = make_error_response(
+                request.id,
+                ErrorCode.INTERNAL_ERROR,
+                str(e),
+                data={
+                    "tool": e.tool_name,
+                    "timeout_seconds": e.timeout_seconds,
+                    "failure_mode": "timeout",
+                },
+            )
+            return response, context
 
         # CONTEXT GROWTH: Result is appended to context here.
         context = context.with_result(call_result)
