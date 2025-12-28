@@ -13,7 +13,7 @@ import pytest
 
 from rest_to_mcp.endpoints import HttpMethod, RestEndpoint
 from rest_to_mcp.adapter import RestToMcpAdapter, JSONPLACEHOLDER_ENDPOINTS
-from rest_to_mcp.models import JsonRpcRequest
+from rest_to_mcp.models import JsonRpcRequest, ToolValidationError
 
 
 # -----------------------------------------------------------------------------
@@ -99,10 +99,156 @@ class TestRestEndpoint:
             body_params=["name", "value"],
         )
         tool = endpoint.to_mcp_tool()
-        
+
         # Body params are required for POST
         assert "name" in tool.inputSchema.required
         assert "value" in tool.inputSchema.required
+
+
+# -----------------------------------------------------------------------------
+# Constrained Tool Invocation Tests (PR 4)
+# -----------------------------------------------------------------------------
+
+
+class TestRestEndpointValidation:
+    """
+    Tests for endpoint argument validation.
+
+    FAIL LOUDLY: Validation catches missing required parameters BEFORE
+    HTTP requests are made. There is no silent degradation.
+    """
+
+    def test_validate_path_params_missing(self):
+        """Missing path params must be rejected."""
+        endpoint = RestEndpoint(
+            name="get_item",
+            path="/items/{id}",
+            method=HttpMethod.GET,
+            description="Get item by ID",
+            path_params=["id"],
+        )
+
+        errors = endpoint.validate_arguments({})
+        assert len(errors) == 1
+        assert "path parameter" in errors[0]
+        assert "'id'" in errors[0]
+
+    def test_validate_path_params_empty_string(self):
+        """Empty path params must be rejected."""
+        endpoint = RestEndpoint(
+            name="get_item",
+            path="/items/{id}",
+            method=HttpMethod.GET,
+            description="Get item by ID",
+            path_params=["id"],
+        )
+
+        errors = endpoint.validate_arguments({"id": "   "})
+        assert len(errors) == 1
+        assert "cannot be empty" in errors[0]
+
+    def test_validate_path_params_present(self):
+        """Valid path params pass validation."""
+        endpoint = RestEndpoint(
+            name="get_item",
+            path="/items/{id}",
+            method=HttpMethod.GET,
+            description="Get item by ID",
+            path_params=["id"],
+        )
+
+        errors = endpoint.validate_arguments({"id": "123"})
+        assert errors == []
+
+    def test_validate_body_params_missing_for_post(self):
+        """Missing body params for POST must be rejected."""
+        endpoint = RestEndpoint(
+            name="create_item",
+            path="/items",
+            method=HttpMethod.POST,
+            description="Create item",
+            body_params=["name", "value"],
+        )
+
+        errors = endpoint.validate_arguments({})
+        assert len(errors) == 2
+        assert any("'name'" in e for e in errors)
+        assert any("'value'" in e for e in errors)
+
+    def test_validate_body_params_partial_for_post(self):
+        """Partial body params for POST must be rejected."""
+        endpoint = RestEndpoint(
+            name="create_item",
+            path="/items",
+            method=HttpMethod.POST,
+            description="Create item",
+            body_params=["name", "value"],
+        )
+
+        errors = endpoint.validate_arguments({"name": "test"})
+        assert len(errors) == 1
+        assert "'value'" in errors[0]
+
+    def test_validate_body_params_optional_for_get(self):
+        """Body params are not required for GET."""
+        endpoint = RestEndpoint(
+            name="get_item",
+            path="/items/{id}",
+            method=HttpMethod.GET,
+            description="Get item by ID",
+            path_params=["id"],
+            body_params=["optional_body"],  # Unusual but valid
+        )
+
+        errors = endpoint.validate_arguments({"id": "123"})
+        assert errors == []
+
+    def test_validate_query_params_optional(self):
+        """Query params are always optional."""
+        endpoint = RestEndpoint(
+            name="search_items",
+            path="/items",
+            method=HttpMethod.GET,
+            description="Search items",
+            query_params=["q", "limit", "offset"],
+        )
+
+        # No query params provided - should be valid
+        errors = endpoint.validate_arguments({})
+        assert errors == []
+
+    def test_validate_multiple_errors(self):
+        """Multiple validation errors are collected."""
+        endpoint = RestEndpoint(
+            name="update_item",
+            path="/items/{id}",
+            method=HttpMethod.PUT,
+            description="Update item",
+            path_params=["id"],
+            body_params=["name", "value"],
+        )
+
+        errors = endpoint.validate_arguments({})
+        assert len(errors) == 3  # 1 path + 2 body
+
+
+class TestToolValidationError:
+    """Tests for ToolValidationError exception."""
+
+    def test_exception_message(self):
+        """Exception message includes tool name and all errors."""
+        error = ToolValidationError("get_user", ["error 1", "error 2"])
+
+        assert "get_user" in str(error)
+        assert "error 1" in str(error)
+        assert "error 2" in str(error)
+
+    def test_exception_attributes(self):
+        """Exception exposes tool name and errors."""
+        error = ToolValidationError("get_user", ["missing id"])
+
+        assert error.tool_name == "get_user"
+        assert error.errors == ["missing id"]
 
 
 # -----------------------------------------------------------------------------
@@ -265,6 +411,66 @@ class TestRestToMcpAdapter:
         assert hasattr(response, "error")
         assert response.error.code == -32602  # INVALID_PARAMS
         assert context.is_sealed  # Context must be sealed even on error
+
+    @pytest.mark.asyncio
+    async def test_call_tool_raises_validation_error(self, mock_adapter):
+        """call_tool must raise ToolValidationError for missing required params."""
+        adapter, _ = mock_adapter
+
+        with pytest.raises(ToolValidationError) as exc_info:
+            await adapter.call_tool("get_item", {})  # Missing required 'id'
+
+        assert exc_info.value.tool_name == "get_item"
+        assert len(exc_info.value.errors) == 1
+        assert "'id'" in exc_info.value.errors[0]
+
+    @pytest.mark.asyncio
+    async def test_call_tool_raises_validation_error_for_post(self, mock_adapter):
+        """call_tool must raise ToolValidationError for missing body params on POST."""
+        adapter, _ = mock_adapter
+
+        with pytest.raises(ToolValidationError) as exc_info:
+            await adapter.call_tool("create_item", {})  # Missing required 'name'
+
+        assert exc_info.value.tool_name == "create_item"
+        assert any("'name'" in e for e in exc_info.value.errors)
+
+    @pytest.mark.asyncio
+    async def test_handle_request_validation_error_response(self, mock_adapter):
+        """handle_request must return proper error for validation failures."""
+        adapter, _ = mock_adapter
+        request = JsonRpcRequest(
+            id=6,
+            method="tools/call",
+            params={"name": "get_item", "arguments": {}},  # Missing 'id'
+        )
+
+        response, context = await adapter.handle_request(request)
+
+        assert hasattr(response, "error")
+        assert response.error.code == -32602  # INVALID_PARAMS
+        assert "get_item" in response.error.message
+        assert response.error.data is not None
+        assert response.error.data["tool"] == "get_item"
+        assert len(response.error.data["errors"]) == 1
+        assert context.is_sealed
+
+    @pytest.mark.asyncio
+    async def test_handle_request_validation_error_preserves_context(self, mock_adapter):
+        """Validation errors should preserve tool binding in context."""
+        adapter, _ = mock_adapter
+        request = JsonRpcRequest(
+            id=7,
+            method="tools/call",
+            params={"name": "get_item", "arguments": {}},
+        )
+
+        response, context = await adapter.handle_request(request)
+
+        # Context should still have tool_name bound even on validation failure
+        assert context.tool_name == "get_item"
+        # But no results (tool never executed)
+        assert len(context.results) == 0
 
 
 # -----------------------------------------------------------------------------

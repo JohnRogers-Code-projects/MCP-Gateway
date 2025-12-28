@@ -42,6 +42,7 @@ from .models import (
     Tool,
     ToolCallParams,
     ToolCallResult,
+    ToolValidationError,
     make_error_response,
     make_success_response,
 )
@@ -114,11 +115,16 @@ class RestToMcpAdapter:
         """
         Execute a tool by calling the underlying REST endpoint.
 
-        This is where the actual translation happens:
-        1. Look up the endpoint definition
-        2. Build the HTTP request (path, query, body)
-        3. Make the request
-        4. Transform the response to MCP content blocks
+        FAIL LOUDLY: Validation happens BEFORE HTTP request is built.
+        Missing required parameters raise ToolValidationError immediately.
+        There is no silent degradation or partial requests.
+
+        Flow:
+        1. Look up endpoint (fail if unknown)
+        2. VALIDATE arguments (fail loudly if invalid)
+        3. Build HTTP request (params guaranteed present after validation)
+        4. Make request
+        5. Transform response
         """
         if name not in self.endpoints:
             return ToolCallResult(
@@ -127,6 +133,12 @@ class RestToMcpAdapter:
             )
 
         endpoint = self.endpoints[name]
+
+        # VALIDATION GATE: Fail loudly if required parameters are missing
+        validation_errors = endpoint.validate_arguments(arguments)
+        if validation_errors:
+            raise ToolValidationError(name, validation_errors)
+
         url = self._build_url(endpoint, arguments)
         query_params = self._build_query_params(endpoint, arguments)
         body = self._build_body(endpoint, arguments)
@@ -266,8 +278,19 @@ class RestToMcpAdapter:
         # Update context with tool call information (immutable)
         context = context.with_tool_call(params.name, params.arguments)
 
-        # Execute the tool
-        call_result = await self.call_tool(params.name, params.arguments)
+        # Execute the tool (may raise ToolValidationError)
+        try:
+            call_result = await self.call_tool(params.name, params.arguments)
+        except ToolValidationError as e:
+            # LOUD FAILURE: Validation errors are returned as proper errors
+            # not silently swallowed or partially executed
+            response = make_error_response(
+                request.id,
+                ErrorCode.INVALID_PARAMS,
+                str(e),
+                data={"tool": e.tool_name, "errors": e.errors},
+            )
+            return response, context
 
         # CONTEXT GROWTH: Result is appended to context here.
         # Each tool call adds to accumulated context size.

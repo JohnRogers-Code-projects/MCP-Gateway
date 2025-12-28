@@ -48,6 +48,37 @@ class RestEndpoint:
     body_params: list[str] | None = None
     base_url: str | None = None
 
+    def validate_arguments(self, arguments: dict[str, Any]) -> list[str]:
+        """
+        Validate that all required arguments are present.
+
+        Returns list of validation errors. Empty list = valid.
+
+        FAIL LOUDLY: This method exists to catch invalid invocations BEFORE
+        they reach the HTTP layer. Missing required parameters should never
+        silently degrade to partial requests.
+
+        Required parameters:
+        - All path_params (always required - URLs cannot have holes)
+        - All body_params for POST/PUT/PATCH (body cannot be incomplete)
+        """
+        errors: list[str] = []
+
+        # Path params are ALWAYS required - you cannot have a URL with holes
+        for param in self.path_params or []:
+            if param not in arguments:
+                errors.append(f"Missing required path parameter: '{param}'")
+            elif not str(arguments[param]).strip():
+                errors.append(f"Path parameter '{param}' cannot be empty")
+
+        # Body params are required for mutating methods
+        if self.method in (HttpMethod.POST, HttpMethod.PUT, HttpMethod.PATCH):
+            for param in self.body_params or []:
+                if param not in arguments:
+                    errors.append(f"Missing required body parameter: '{param}'")
+
+        return errors
+
     def to_mcp_tool(self) -> "Tool":
         """Convert this REST endpoint definition to an MCP Tool."""
         from .models import Tool, ToolInputSchema
