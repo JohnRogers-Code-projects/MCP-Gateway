@@ -461,14 +461,47 @@ class ExecutionContext:
             )
 
     # -------------------------------------------------------------------------
+    # Context Boundary (THE point where accumulated data is destroyed)
+    # -------------------------------------------------------------------------
+
+    def discard_results(self) -> "ExecutionContext":
+        """
+        DESTROY all accumulated results. Returns context with empty results.
+
+        THIS IS THE CONTEXT BOUNDARY.
+
+        WHY THIS LOSS IS NECESSARY:
+        Accumulated tool results contain unbounded data from external sources.
+        Downstream code (other tools, external systems) must not see this data.
+        If they need specific information, it must be extracted BEFORE this
+        boundary and passed explicitly. There is no way to recover discarded
+        results. This is intentional.
+
+        This method exists to make context reduction:
+        - Visible (you see it in the orchestration flow)
+        - Mandatory (there is no "keep some" option)
+        - Irreversible (data is destroyed, not hidden)
+        """
+        self._check_not_sealed("discard_results")
+
+        new_ctx = ExecutionContext(
+            self._request_id, self._method, _trust_caller=True
+        )
+        new_ctx._tool_name = self._tool_name
+        new_ctx._arguments = dict(self._arguments)
+        new_ctx._results = ()  # DESTROYED. No configuration. No recovery.
+        new_ctx._created_at = self._created_at
+        return new_ctx
+
+    # -------------------------------------------------------------------------
     # Representation
     # -------------------------------------------------------------------------
 
     def __repr__(self) -> str:
         sealed_marker = " SEALED" if self._sealed else ""
         tool_info = f" tool={self._tool_name}" if self._tool_name else ""
+        result_info = f" results={len(self._results)}" if self._results else ""
         return (
             f"<ExecutionContext id={self._request_id} "
-            f"method={self._method}{tool_info} "
-            f"results={len(self._results)}{sealed_marker}>"
+            f"method={self._method}{tool_info}{result_info}{sealed_marker}>"
         )

@@ -378,3 +378,94 @@ class TestExecutionContext:
         context = ExecutionContext.from_request(request).seal()
 
         assert "SEALED" in repr(context)
+
+    # -------------------------------------------------------------------------
+    # Context Boundary (THE point where accumulated data is destroyed)
+    # -------------------------------------------------------------------------
+
+    def test_discard_results_destroys_all(self):
+        """discard_results destroys ALL accumulated results."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request).with_tool_call("test", {})
+
+        r1 = ToolCallResult(content=[TextContent(text="first")])
+        r2 = ToolCallResult(content=[TextContent(text="second")])
+        r3 = ToolCallResult(content=[TextContent(text="third")])
+
+        ctx = context.with_result(r1).with_result(r2).with_result(r3)
+        assert len(ctx.results) == 3
+
+        # THE BOUNDARY: All results destroyed
+        discarded = ctx.discard_results()
+        assert len(discarded.results) == 0
+
+    def test_discard_results_preserves_identity(self):
+        """discard_results preserves request identity and tool binding."""
+        request = JsonRpcRequest(id=42, method="tools/call")
+        context = ExecutionContext.from_request(request).with_tool_call("get_user", {"id": "5"})
+        result = ToolCallResult(content=[TextContent(text="data")])
+        ctx = context.with_result(result)
+
+        discarded = ctx.discard_results()
+
+        # Identity preserved
+        assert discarded.request_id == 42
+        assert discarded.method == "tools/call"
+        assert discarded.tool_name == "get_user"
+        assert discarded.arguments == {"id": "5"}
+
+        # Results destroyed
+        assert len(discarded.results) == 0
+
+    def test_discard_results_is_irreversible(self):
+        """Once discarded, results cannot be recovered from the new context."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request).with_tool_call("test", {})
+        result = ToolCallResult(content=[TextContent(text="important data")])
+
+        ctx = context.with_result(result)
+        discarded = ctx.discard_results()
+
+        # The discarded context has no access to original results
+        assert len(discarded.results) == 0
+
+        # Original context still has results (immutable pattern)
+        assert len(ctx.results) == 1
+        assert ctx.results[0].content[0].text == "important data"
+
+    def test_discard_results_returns_new_context(self):
+        """discard_results returns a new instance, not mutated original."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request).with_tool_call("test", {})
+        result = ToolCallResult(content=[TextContent(text="data")])
+        ctx = context.with_result(result)
+
+        discarded = ctx.discard_results()
+
+        assert ctx is not discarded
+        assert len(ctx.results) == 1
+        assert len(discarded.results) == 0
+
+    def test_discard_results_rejects_sealed(self):
+        """discard_results rejects sealed context."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request).with_tool_call("test", {})
+        result = ToolCallResult(content=[TextContent(text="data")])
+        ctx = context.with_result(result).seal()
+
+        with pytest.raises(ContextError) as exc_info:
+            ctx.discard_results()
+
+        assert "sealed" in str(exc_info.value)
+
+    def test_discard_results_on_empty_is_valid(self):
+        """Discarding an already-empty context is valid (idempotent for empty)."""
+        request = JsonRpcRequest(id=1, method="tools/call")
+        context = ExecutionContext.from_request(request).with_tool_call("test", {})
+
+        # No results yet
+        assert len(context.results) == 0
+
+        # Discard on empty is valid
+        discarded = context.discard_results()
+        assert len(discarded.results) == 0
