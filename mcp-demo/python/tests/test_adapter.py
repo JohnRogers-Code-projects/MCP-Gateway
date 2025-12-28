@@ -114,8 +114,10 @@ class TestRestEndpointValidation:
     """
     Tests for endpoint argument validation.
 
-    FAIL LOUDLY: Validation catches missing required parameters BEFORE
-    HTTP requests are made. There is no silent degradation.
+    CONSTRAINED BY DESIGN:
+    - Tools receive ONLY declared parameters
+    - Unknown arguments are REJECTED
+    - There is no silent degradation
     """
 
     def test_validate_path_params_missing(self):
@@ -231,6 +233,58 @@ class TestRestEndpointValidation:
         errors = endpoint.validate_arguments({})
         assert len(errors) == 3  # 1 path + 2 body
 
+    # -------------------------------------------------------------------------
+    # CONSTRAINED: Unknown arguments are REJECTED
+    # -------------------------------------------------------------------------
+
+    def test_validate_rejects_unknown_arguments(self):
+        """Unknown arguments must be rejected - tools receive ONLY what they declare."""
+        endpoint = RestEndpoint(
+            name="get_item",
+            path="/items/{id}",
+            method=HttpMethod.GET,
+            description="Get item by ID",
+            path_params=["id"],
+        )
+
+        errors = endpoint.validate_arguments({"id": "123", "extra": "not_allowed"})
+        assert len(errors) == 1
+        assert "Unknown argument" in errors[0]
+        assert "'extra'" in errors[0]
+        assert "does not accept" in errors[0]
+
+    def test_validate_rejects_multiple_unknown_arguments(self):
+        """Multiple unknown arguments all rejected."""
+        endpoint = RestEndpoint(
+            name="get_items",
+            path="/items",
+            method=HttpMethod.GET,
+            description="Get all items",
+        )
+
+        errors = endpoint.validate_arguments({"foo": "bar", "baz": "qux"})
+        assert len(errors) == 2
+        assert all("Unknown argument" in e for e in errors)
+
+    def test_validate_allows_optional_query_params(self):
+        """Optional query params are allowed but not required."""
+        endpoint = RestEndpoint(
+            name="search",
+            path="/search",
+            method=HttpMethod.GET,
+            description="Search",
+            query_params=["q", "limit"],
+        )
+
+        # Providing optional params is fine
+        errors = endpoint.validate_arguments({"q": "test"})
+        assert errors == []
+
+        # But unknown params still rejected
+        errors = endpoint.validate_arguments({"q": "test", "unknown": "bad"})
+        assert len(errors) == 1
+        assert "Unknown argument" in errors[0]
+
 
 class TestToolValidationError:
     """Tests for ToolValidationError exception."""
@@ -249,6 +303,92 @@ class TestToolValidationError:
 
         assert error.tool_name == "get_user"
         assert error.errors == ["missing id"]
+
+
+class TestDestructiveOperationGuards:
+    """
+    Tests for deliberate misuse checks on destructive operations.
+
+    INTENTIONALLY CONSTRAINED:
+    - Destructive operations have additional guards beyond schema validation
+    - Invalid IDs are rejected with clear, deliberate error messages
+    - There is no recovery, no retry, no workaround
+    """
+
+    @pytest.fixture
+    def adapter_with_delete(self):
+        """Create adapter with delete_post and update_post endpoints."""
+        adapter = RestToMcpAdapter(
+            base_url="https://api.example.com",
+            endpoints=[
+                RestEndpoint(
+                    name="delete_post",
+                    path="/posts/{id}",
+                    method=HttpMethod.DELETE,
+                    description="Delete a post by ID",
+                    path_params=["id"],
+                ),
+                RestEndpoint(
+                    name="update_post",
+                    path="/posts/{id}",
+                    method=HttpMethod.PUT,
+                    description="Update a post",
+                    path_params=["id"],
+                    body_params=["title", "body", "userId"],
+                ),
+            ],
+        )
+        return adapter
+
+    @pytest.mark.asyncio
+    async def test_delete_post_rejects_zero_id(self, adapter_with_delete):
+        """delete_post with id=0 is rejected as deliberate misuse."""
+        with pytest.raises(ToolValidationError) as exc_info:
+            await adapter_with_delete.call_tool("delete_post", {"id": "0"})
+
+        assert "Destructive operation rejected" in str(exc_info.value)
+        assert "deliberate" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_delete_post_rejects_negative_id(self, adapter_with_delete):
+        """delete_post with negative id is rejected as deliberate misuse."""
+        with pytest.raises(ToolValidationError) as exc_info:
+            await adapter_with_delete.call_tool("delete_post", {"id": "-5"})
+
+        assert "Destructive operation rejected" in str(exc_info.value)
+        assert "positive integers" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_delete_post_rejects_non_numeric_id(self, adapter_with_delete):
+        """delete_post with non-numeric id is rejected as deliberate misuse."""
+        with pytest.raises(ToolValidationError) as exc_info:
+            await adapter_with_delete.call_tool("delete_post", {"id": "abc"})
+
+        assert "Destructive operation rejected" in str(exc_info.value)
+        assert "not a valid integer" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_update_post_rejects_zero_id(self, adapter_with_delete):
+        """update_post with id=0 is rejected as deliberate misuse."""
+        with pytest.raises(ToolValidationError) as exc_info:
+            await adapter_with_delete.call_tool(
+                "update_post",
+                {"id": "0", "title": "x", "body": "y", "userId": "1"},
+            )
+
+        assert "Destructive operation rejected" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_update_post_rejects_non_numeric_id(self, adapter_with_delete):
+        """update_post with non-numeric id is rejected as deliberate misuse."""
+        with pytest.raises(ToolValidationError) as exc_info:
+            await adapter_with_delete.call_tool(
+                "update_post",
+                {"id": "not_a_number", "title": "x", "body": "y", "userId": "1"},
+            )
+
+        assert "Destructive operation rejected" in str(exc_info.value)
+        assert "not a valid integer" in str(exc_info.value)
 
 
 # -----------------------------------------------------------------------------

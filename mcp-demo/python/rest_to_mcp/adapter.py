@@ -115,16 +115,20 @@ class RestToMcpAdapter:
         """
         Execute a tool by calling the underlying REST endpoint.
 
-        FAIL LOUDLY: Validation happens BEFORE HTTP request is built.
-        Missing required parameters raise ToolValidationError immediately.
-        There is no silent degradation or partial requests.
+        CONSTRAINED INVOCATION:
+        - Tools receive ONLY declared parameters (unknown args rejected)
+        - Destructive operations have additional guards
+        - Validation happens BEFORE HTTP request is built
+        - Missing/invalid parameters raise ToolValidationError immediately
+        - There is no silent degradation, no retry, no recovery
 
         Flow:
         1. Look up endpoint (fail if unknown)
         2. VALIDATE arguments (fail loudly if invalid)
-        3. Build HTTP request (params guaranteed present after validation)
-        4. Make request
-        5. Transform response
+        3. GUARD destructive operations (deliberate misuse check)
+        4. Build HTTP request (params guaranteed valid after checks)
+        5. Make request
+        6. Transform response
         """
         if name not in self.endpoints:
             return ToolCallResult(
@@ -134,10 +138,15 @@ class RestToMcpAdapter:
 
         endpoint = self.endpoints[name]
 
-        # VALIDATION GATE: Fail loudly if required parameters are missing
+        # VALIDATION GATE: Fail loudly if arguments are invalid
         validation_errors = endpoint.validate_arguments(arguments)
         if validation_errors:
             raise ToolValidationError(name, validation_errors)
+
+        # DELIBERATE MISUSE CHECK: Guard destructive operations
+        # This demonstrates intentional constraint - certain operations
+        # have additional checks that cannot be bypassed
+        self._guard_destructive_operation(name, arguments)
 
         url = self._build_url(endpoint, arguments)
         query_params = self._build_query_params(endpoint, arguments)
@@ -202,6 +211,72 @@ class RestToMcpAdapter:
             text = response.text
 
         return [TextContent(text=text)]
+
+    def _guard_destructive_operation(
+        self, name: str, arguments: dict[str, Any]
+    ) -> None:
+        """
+        Guard against misuse of destructive operations.
+
+        DELIBERATE CONSTRAINT: Certain operations have additional checks
+        that go beyond schema validation. This is intentional.
+
+        WHY THIS EXISTS:
+        - Demonstrates that tools can be constrained beyond their schema
+        - Makes it obvious that destructive operations are guarded
+        - Fails LOUDLY with clear message explaining the constraint
+
+        This method does NOT:
+        - Retry on failure
+        - Recover silently
+        - Provide workarounds
+
+        Raises:
+            ToolValidationError: If the operation would be destructive misuse
+        """
+        # Guard delete_post: ID must be a positive integer
+        if name == "delete_post":
+            id_value = arguments.get("id", "")
+            try:
+                id_int = int(id_value)
+                if id_int <= 0:
+                    raise ToolValidationError(
+                        name,
+                        [
+                            f"Destructive operation rejected: id={id_value} is not a valid post ID. "
+                            "Post IDs must be positive integers. This constraint is deliberate."
+                        ],
+                    )
+            except (ValueError, TypeError):
+                raise ToolValidationError(
+                    name,
+                    [
+                        f"Destructive operation rejected: id={id_value!r} is not a valid integer. "
+                        "delete_post requires a numeric post ID. This constraint is deliberate."
+                    ],
+                )
+
+        # Guard update_post: ID must be a positive integer
+        if name == "update_post":
+            id_value = arguments.get("id", "")
+            try:
+                id_int = int(id_value)
+                if id_int <= 0:
+                    raise ToolValidationError(
+                        name,
+                        [
+                            f"Destructive operation rejected: id={id_value} is not a valid post ID. "
+                            "Post IDs must be positive integers. This constraint is deliberate."
+                        ],
+                    )
+            except (ValueError, TypeError):
+                raise ToolValidationError(
+                    name,
+                    [
+                        f"Destructive operation rejected: id={id_value!r} is not a valid integer. "
+                        "update_post requires a numeric post ID. This constraint is deliberate."
+                    ],
+                )
 
     async def handle_request(
         self, request: JsonRpcRequest
