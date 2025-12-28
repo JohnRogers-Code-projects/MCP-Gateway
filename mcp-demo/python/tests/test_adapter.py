@@ -828,6 +828,81 @@ class TestMultiApiSupport:
 
 
 # -----------------------------------------------------------------------------
+# Domain Adapter Isolation Tests
+# -----------------------------------------------------------------------------
+
+
+class TestDomainAdapterIsolation:
+    """Tests verifying domain-specific endpoints are properly isolated."""
+
+    def test_domain_modules_exist(self):
+        """Domain modules should be importable directly."""
+        from rest_to_mcp.domains import jsonplaceholder, openmeteo
+        assert hasattr(jsonplaceholder, "JSONPLACEHOLDER_ENDPOINTS")
+        assert hasattr(openmeteo, "OPEN_METEO_ENDPOINTS")
+
+    def test_domain_endpoints_match_aggregated(self):
+        """Endpoints imported from domains should match aggregated list."""
+        from rest_to_mcp.domains.jsonplaceholder import JSONPLACEHOLDER_ENDPOINTS as jp_direct
+        from rest_to_mcp.domains.openmeteo import OPEN_METEO_ENDPOINTS as om_direct
+        from rest_to_mcp.endpoints import (
+            JSONPLACEHOLDER_ENDPOINTS as jp_aggregated,
+            OPEN_METEO_ENDPOINTS as om_aggregated,
+        )
+        assert jp_direct is jp_aggregated
+        assert om_direct is om_aggregated
+
+    def test_domain_isolation_jsonplaceholder_has_no_base_url(self):
+        """JSONPlaceholder endpoints use adapter's base_url (no per-endpoint base_url)."""
+        from rest_to_mcp.domains.jsonplaceholder import JSONPLACEHOLDER_ENDPOINTS
+        for endpoint in JSONPLACEHOLDER_ENDPOINTS:
+            assert endpoint.base_url is None
+
+    def test_domain_isolation_openmeteo_has_base_url(self):
+        """Open-Meteo endpoints have their own base_url."""
+        from rest_to_mcp.domains.openmeteo import OPEN_METEO_ENDPOINTS
+        from rest_to_mcp.config import OPEN_METEO_BASE_URL
+        for endpoint in OPEN_METEO_ENDPOINTS:
+            assert endpoint.base_url == OPEN_METEO_BASE_URL
+
+    def test_adding_domain_pattern(self):
+        """
+        Verify the pattern for adding a new domain.
+
+        A new domain should only require:
+        1. Creating domains/newdomain.py with NEWDOMAIN_ENDPOINTS
+        2. Importing in endpoints.py (or directly where needed)
+
+        This test documents the pattern without adding an actual domain.
+        """
+        from rest_to_mcp.endpoints import RestEndpoint, HttpMethod
+
+        # Simulating a new domain definition
+        MOCK_DOMAIN_ENDPOINTS = [
+            RestEndpoint(
+                name="mock_operation",
+                path="/mock",
+                method=HttpMethod.GET,
+                description="Mock operation for pattern test",
+                base_url="https://mock.example.com",
+            ),
+        ]
+
+        # The pattern: new endpoints can be registered without modifying adapter
+        from rest_to_mcp.adapter import RestToMcpAdapter
+        from rest_to_mcp.config import JSONPLACEHOLDER_BASE_URL
+
+        adapter = RestToMcpAdapter(
+            base_url=JSONPLACEHOLDER_BASE_URL,
+            endpoints=MOCK_DOMAIN_ENDPOINTS,
+        )
+
+        tools = adapter.list_tools()
+        assert len(tools) == 1
+        assert tools[0].name == "mock_operation"
+
+
+# -----------------------------------------------------------------------------
 # Playground Cross-Step Data Flow Tests
 # -----------------------------------------------------------------------------
 

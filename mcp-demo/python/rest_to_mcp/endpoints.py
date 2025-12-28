@@ -1,8 +1,13 @@
 """
 Endpoint definitions for REST-to-MCP adapter.
 
-Separates endpoint data from adapter logic for better maintainability.
-Each API's endpoints are defined as a list of RestEndpoint objects.
+This module contains:
+- Core types: HttpMethod, RestEndpoint
+- Aggregated endpoint lists imported from domain modules
+
+Domain-specific endpoints are isolated in the domains/ package.
+To add a new domain: create domains/newdomain.py and import here.
+To remove a domain: delete the file and remove the import.
 """
 
 from __future__ import annotations
@@ -10,8 +15,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
-
-from .config import JSONPLACEHOLDER_BASE_URL, OPEN_METEO_BASE_URL
 
 
 class HttpMethod(str, Enum):
@@ -143,93 +146,11 @@ from .models import Tool  # noqa: E402
 
 
 # -----------------------------------------------------------------------------
-# JSONPlaceholder API Endpoints
-# https://jsonplaceholder.typicode.com
+# Domain Endpoints (imported from isolated domain modules)
 # -----------------------------------------------------------------------------
 
-JSONPLACEHOLDER_ENDPOINTS: list[RestEndpoint] = [
-    RestEndpoint(
-        name="get_posts",
-        path="/posts",
-        method=HttpMethod.GET,
-        description="Get all posts. Optionally filter by userId.",
-        query_params=["userId"],
-    ),
-    RestEndpoint(
-        name="get_post",
-        path="/posts/{id}",
-        method=HttpMethod.GET,
-        description="Get a specific post by ID.",
-        path_params=["id"],
-    ),
-    RestEndpoint(
-        name="create_post",
-        path="/posts",
-        method=HttpMethod.POST,
-        description="Create a new post with title, body, and userId.",
-        body_params=["title", "body", "userId"],
-    ),
-    RestEndpoint(
-        name="update_post",
-        path="/posts/{id}",
-        method=HttpMethod.PUT,
-        description="Update an existing post.",
-        path_params=["id"],
-        body_params=["title", "body", "userId"],
-    ),
-    RestEndpoint(
-        name="delete_post",
-        path="/posts/{id}",
-        method=HttpMethod.DELETE,
-        description="Delete a post by ID.",
-        path_params=["id"],
-    ),
-    RestEndpoint(
-        name="get_comments",
-        path="/posts/{postId}/comments",
-        method=HttpMethod.GET,
-        description="Get all comments for a specific post.",
-        path_params=["postId"],
-    ),
-    RestEndpoint(
-        name="get_users",
-        path="/users",
-        method=HttpMethod.GET,
-        description="Get all users.",
-    ),
-    RestEndpoint(
-        name="get_user",
-        path="/users/{id}",
-        method=HttpMethod.GET,
-        description="Get a specific user by ID.",
-        path_params=["id"],
-    ),
-]
-
-
-# -----------------------------------------------------------------------------
-# Open-Meteo Weather API Endpoints
-# https://open-meteo.com/en/docs
-# -----------------------------------------------------------------------------
-
-OPEN_METEO_ENDPOINTS: list[RestEndpoint] = [
-    RestEndpoint(
-        name="get_weather",
-        path="/v1/forecast",
-        method=HttpMethod.GET,
-        description="Get current weather for coordinates. Returns temperature, wind speed, and conditions.",
-        query_params=["latitude", "longitude", "current_weather"],
-        base_url=OPEN_METEO_BASE_URL,
-    ),
-    RestEndpoint(
-        name="get_forecast",
-        path="/v1/forecast",
-        method=HttpMethod.GET,
-        description="Get 7-day weather forecast for coordinates.",
-        query_params=["latitude", "longitude", "daily", "timezone"],
-        base_url=OPEN_METEO_BASE_URL,
-    ),
-]
+from .domains.jsonplaceholder import JSONPLACEHOLDER_ENDPOINTS
+from .domains.openmeteo import OPEN_METEO_ENDPOINTS
 
 
 # -----------------------------------------------------------------------------
