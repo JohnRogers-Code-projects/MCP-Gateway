@@ -42,6 +42,7 @@ from .models import (
     Tool,
     ToolCallParams,
     ToolCallResult,
+    ToolValidationError,
     make_error_response,
     make_success_response,
 )
@@ -112,13 +113,19 @@ class RestToMcpAdapter:
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolCallResult:
         """
-        Execute a tool by calling the underlying REST endpoint.
+        Execute a tool. This is a DUMB executor.
 
-        This is where the actual translation happens:
-        1. Look up the endpoint definition
-        2. Build the HTTP request (path, query, body)
-        3. Make the request
-        4. Transform the response to MCP content blocks
+        THIS METHOD DOES NOT:
+        - Validate arguments (orchestration's job)
+        - Guard against misuse (orchestration's job)
+        - Make policy decisions (orchestration's job)
+        - Infer intent (orchestration's job)
+
+        It receives a tool name and arguments, makes the HTTP call,
+        and returns the result. That's all.
+
+        Orchestration (_handle_tools_call) decides WHAT to call.
+        This method only knows HOW to call.
         """
         if name not in self.endpoints:
             return ToolCallResult(
@@ -244,7 +251,16 @@ class RestToMcpAdapter:
     async def _handle_tools_call(
         self, request: JsonRpcRequest, context: ExecutionContext
     ) -> tuple[JsonRpcResponse | JsonRpcErrorResponse, ExecutionContext]:
-        """Handle tools/call method with context tracking."""
+        """
+        Handle tools/call method. ORCHESTRATION decides policy here.
+
+        This is where intelligence lives:
+        - Validate arguments against schema
+        - Guard destructive operations
+        - Decide whether to proceed
+
+        The tool (call_tool) is dumb. It just executes what we tell it.
+        """
         if request.params is None:
             response = make_error_response(
                 request.id,
@@ -266,16 +282,77 @@ class RestToMcpAdapter:
         # Update context with tool call information (immutable)
         context = context.with_tool_call(params.name, params.arguments)
 
-        # Execute the tool
+        # ---------------------------------------------------------------------
+        # ORCHESTRATION POLICY: Validate before invoking tool
+        # ---------------------------------------------------------------------
+        if params.name not in self.endpoints:
+            response = make_error_response(
+                request.id,
+                ErrorCode.INVALID_PARAMS,
+                f"Unknown tool: {params.name}",
+            )
+            return response, context
+
+        endpoint = self.endpoints[params.name]
+        validation_errors = endpoint.validate_arguments(params.arguments)
+        if validation_errors:
+            response = make_error_response(
+                request.id,
+                ErrorCode.INVALID_PARAMS,
+                f"Tool '{params.name}' validation failed: {'; '.join(validation_errors)}",
+                data={"tool": params.name, "errors": validation_errors},
+            )
+            return response, context
+
+        # ---------------------------------------------------------------------
+        # ORCHESTRATION POLICY: Guard destructive operations
+        # ---------------------------------------------------------------------
+        guard_error = self._check_destructive_operation(params.name, params.arguments)
+        if guard_error:
+            response = make_error_response(
+                request.id,
+                ErrorCode.INVALID_PARAMS,
+                guard_error,
+                data={"tool": params.name},
+            )
+            return response, context
+
+        # ---------------------------------------------------------------------
+        # Execute the tool (tool is dumb - just executes)
+        # ---------------------------------------------------------------------
         call_result = await self.call_tool(params.name, params.arguments)
 
         # CONTEXT GROWTH: Result is appended to context here.
-        # Each tool call adds to accumulated context size.
-        # For multi-step orchestration, consider context reduction between steps.
         context = context.with_result(call_result)
 
         response = make_success_response(request.id, call_result.model_dump())
         return response, context
+
+    def _check_destructive_operation(
+        self, name: str, arguments: dict[str, Any]
+    ) -> str | None:
+        """
+        Check if a destructive operation should be blocked.
+
+        Returns error message if blocked, None if allowed.
+
+        This is ORCHESTRATION policy, not tool logic.
+        The tool doesn't know it's being guarded.
+        """
+        if name in ("delete_post", "update_post"):
+            id_value = arguments.get("id", "")
+            try:
+                id_int = int(id_value)
+                if id_int <= 0:
+                    return (
+                        f"Destructive operation rejected: id={id_value} is not valid. "
+                        "Post IDs must be positive integers."
+                    )
+            except (ValueError, TypeError):
+                return (
+                    f"Destructive operation rejected: id={id_value!r} is not a valid integer."
+                )
+        return None
 
 
 # -----------------------------------------------------------------------------

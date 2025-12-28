@@ -241,6 +241,25 @@ class ContextError(Exception):
     pass
 
 
+class ToolValidationError(Exception):
+    """
+    Raised when tool invocation fails validation.
+
+    This is a LOUD failure. Invalid tool calls should not silently degrade.
+    Every validation error contains:
+    - tool_name: Which tool was being invoked
+    - errors: List of specific validation failures
+
+    There is no "partial success" mode. Either all required parameters
+    are present and valid, or invocation fails completely.
+    """
+
+    def __init__(self, tool_name: str, errors: list[str]) -> None:
+        self.tool_name = tool_name
+        self.errors = errors
+        super().__init__(f"Tool '{tool_name}' validation failed: {'; '.join(errors)}")
+
+
 class ExecutionContext:
     """
     Canonical context object — the single source of truth for request state.
