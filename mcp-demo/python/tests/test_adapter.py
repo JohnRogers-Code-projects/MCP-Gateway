@@ -305,6 +305,119 @@ class TestToolValidationError:
         assert error.errors == ["missing id"]
 
 
+# -----------------------------------------------------------------------------
+# Deliberate Failure Mode Tests (PR 5)
+# -----------------------------------------------------------------------------
+
+
+class TestToolTimeoutError:
+    """
+    Tests for ToolTimeoutError exception.
+
+    DELIBERATE FAILURE MODE: Timeouts are explicit, not hidden in catch-all.
+    """
+
+    def test_exception_message(self):
+        """Exception message includes tool name and timeout."""
+        from rest_to_mcp.models import ToolTimeoutError
+
+        error = ToolTimeoutError("get_weather", 30.0)
+
+        assert "get_weather" in str(error)
+        assert "30.0" in str(error)
+        assert "timed out" in str(error)
+
+    def test_exception_attributes(self):
+        """Exception exposes tool name and timeout."""
+        from rest_to_mcp.models import ToolTimeoutError
+
+        error = ToolTimeoutError("get_weather", 30.0)
+
+        assert error.tool_name == "get_weather"
+        assert error.timeout_seconds == 30.0
+
+
+class TestDeliberateFailureModes:
+    """
+    Tests for deliberate failure handling.
+
+    EXPLICIT FAILURES:
+    - Timeouts are caught and raised as ToolTimeoutError
+    - Orchestration handles the error with structured response
+    - Failure mode is visible in the response data
+    """
+
+    @pytest.fixture
+    def timeout_adapter(self):
+        """Create adapter that will timeout."""
+        # Use a mock transport that raises TimeoutException
+        import httpx
+
+        class TimeoutTransport(httpx.AsyncBaseTransport):
+            async def handle_async_request(self, request):
+                raise httpx.TimeoutException("Connection timed out")
+
+        adapter = RestToMcpAdapter(
+            base_url="https://api.example.com",
+            endpoints=[
+                RestEndpoint(
+                    name="slow_endpoint",
+                    path="/slow",
+                    method=HttpMethod.GET,
+                    description="An endpoint that times out",
+                ),
+            ],
+        )
+        adapter._client = httpx.AsyncClient(transport=TimeoutTransport())
+        return adapter
+
+    @pytest.mark.asyncio
+    async def test_call_tool_raises_timeout_error(self, timeout_adapter):
+        """call_tool raises ToolTimeoutError on timeout."""
+        from rest_to_mcp.models import ToolTimeoutError
+
+        with pytest.raises(ToolTimeoutError) as exc_info:
+            await timeout_adapter.call_tool("slow_endpoint", {})
+
+        assert exc_info.value.tool_name == "slow_endpoint"
+        assert exc_info.value.timeout_seconds > 0
+
+    @pytest.mark.asyncio
+    async def test_handle_request_returns_timeout_error(self, timeout_adapter):
+        """handle_request returns structured error on timeout."""
+        request = JsonRpcRequest(
+            id=1,
+            method="tools/call",
+            params={"name": "slow_endpoint", "arguments": {}},
+        )
+
+        response, context = await timeout_adapter.handle_request(request)
+
+        assert hasattr(response, "error")
+        assert response.error.code == -32603  # INTERNAL_ERROR
+        assert "timed out" in response.error.message
+        assert response.error.data is not None
+        assert response.error.data["failure_mode"] == "timeout"
+        assert response.error.data["tool"] == "slow_endpoint"
+        assert context.is_sealed
+
+    @pytest.mark.asyncio
+    async def test_timeout_preserves_context_state(self, timeout_adapter):
+        """Timeout preserves context with tool binding but no result."""
+        request = JsonRpcRequest(
+            id=1,
+            method="tools/call",
+            params={"name": "slow_endpoint", "arguments": {}},
+        )
+
+        response, context = await timeout_adapter.handle_request(request)
+
+        # Context was bound to tool before timeout
+        assert context.tool_name == "slow_endpoint"
+        # But no result was recorded (tool didn't complete)
+        assert len(context.results) == 0
+
+
 class TestDestructiveOperationGuards:
     """
     Tests for orchestration-level guards on destructive operations.
