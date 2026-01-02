@@ -1,4 +1,4 @@
-# Claude Instructions — MCP-Demo
+# Claude Instructions — MCP-Gateway
 
 This repository is a **conceptual demonstration**, not a framework.
 

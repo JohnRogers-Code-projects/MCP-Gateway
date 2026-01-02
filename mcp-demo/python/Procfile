@@ -1,0 +1,1 @@
+web: uvicorn rest_to_mcp.server:app --host 0.0.0.0 --port $PORT

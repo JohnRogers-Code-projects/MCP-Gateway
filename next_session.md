@@ -1,4 +1,4 @@
-# MCP-Demo: Next Session
+# MCP-Gateway: Next Session
 
 ## Purpose of This Project
 

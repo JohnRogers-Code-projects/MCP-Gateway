@@ -1,4 +1,4 @@
-# MCP-Demo — Explicit Context Mediation for AI Workflows
+# MCP-Gateway — Explicit Context Mediation for AI Workflows
 
 This repository is a **conceptual demonstration** of how explicit context mediation can be used to build **predictable, composable AI workflows**.
 
@@ -57,7 +57,7 @@ This repository is part of a modular, multi-repo system:
 - **MLForge**  
   Owns execution, persistence, job lifecycle, and APIs.
 
-- **MCP-Demo (this repository)**  
+- **MCP-Gateway (this repository)**
   Owns context boundaries, orchestration decisions, and tool sequencing.
 
 - **ForgeBreaker**  

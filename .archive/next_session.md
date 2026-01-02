@@ -1,4 +1,4 @@
-# MCP-Demo: Next Session Context
+# MCP-Gateway: Next Session Context
 
 ## Last Updated
 2024-12-11
