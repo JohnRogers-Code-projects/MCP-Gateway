@@ -47,7 +47,13 @@
       "Bash(gh api:*)",
       "Bash(railway:*)",
       "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd Railway deployment configuration\n\nAdd Procfile and requirements.txt for Railway deployment of the\nREST-to-MCP adapter service.\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
-      "Bash(git commit -m \"$\\(cat <<''EOF''\nRename MCP-Demo references to MCP-Gateway\n\nUpdate documentation and GitHub link in preparation for\nrepository rename from MCP-Demo to MCP-Gateway.\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nRename MCP-Demo references to MCP-Gateway\n\nUpdate documentation and GitHub link in preparation for\nrepository rename from MCP-Demo to MCP-Gateway.\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(gh repo:*)",
+      "Bash(git push)",
+      "Bash(git pull:*)",
+      "Bash(git merge:*)",
+      "Bash(git stash:*)",
+      "Bash(git branch:*)"
     ],
     "deny": [],
     "ask": []
