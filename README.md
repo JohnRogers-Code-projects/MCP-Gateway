@@ -6,6 +6,16 @@ It is designed to function as a reusable system component alongside other reposi
 
 ---
 
+## System Context
+
+This repository implements the MCP-Gateway used by ForgeBreaker and LarderLab to expose domain tools to LLMs via a shared interface.
+Despite the repository name, this service is active infrastructure within the system described here:
+https://github.com/JohnRogers-Code-projects/JohnRogers
+
+MCP-Gateway is responsible only for tool registration, discovery, invocation, and error normalization. All domain logic lives in the consuming applications.
+
+---
+
 ## Purpose
 
 Modern AI systems often rely on:
