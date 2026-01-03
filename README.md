@@ -2,7 +2,9 @@
 
 This repository is a **conceptual demonstration** of how explicit context mediation can be used to build **predictable, composable AI workflows**.
 
-It is designed to function as a reusable system component alongside other repositories (such as MLForge), while remaining **independent of any specific problem domain**.
+It was designed to function as a reusable system component alongside other repositories (such as MLForge), while remaining **independent of any specific problem domain**.
+
+I built MCP-Gateway to explore what it would take to externalize tool execution, but I deliberately stopped short of integrating it once I realized the complexity tradeoff wasn’t justified yet.
 
 ---
 
