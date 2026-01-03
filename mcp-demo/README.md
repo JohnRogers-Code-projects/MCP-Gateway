@@ -3,7 +3,7 @@
 This directory contains the core implementation:
 
 ```
-mcp-demo/
+mcp-gateway/
 ├── python/          # REST-to-MCP adapter (FastAPI server)
 │   ├── rest_to_mcp/ # Core adapter code
 │   └── tests/       # Test suite (59 tests)

@@ -135,7 +135,7 @@ def benchmark_rust(
     if not RUST_AVAILABLE:
         raise RuntimeError(
             "Rust parser not available. Install Rust and run: "
-            "cd mcp-demo/rust/mcp_parser && maturin develop --release"
+            "cd mcp-gateway/rust/mcp_parser && maturin develop --release"
         )
 
     payload_bytes = len(payload.encode("utf-8"))

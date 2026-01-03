@@ -77,7 +77,7 @@ Summary: "Weather for Clementine Bauch: -5.2°C, Slight snow"
 ## How to Run
 
 ```bash
-cd mcp-demo/python
+cd mcp-gateway/python
 . .venv/Scripts/activate  # Windows
 uvicorn rest_to_mcp.server:app --reload
 ```
@@ -90,10 +90,10 @@ Open http://localhost:8000 - Try "Check weather for user 3" in the Playground ta
 
 ```bash
 # Python tests (59 tests)
-cd mcp-demo/python && pytest -v
+cd mcp-gateway/python && pytest -v
 
 # Rust tests (14 tests)
-cd mcp-demo/rust/mcp_parser
+cd mcp-gateway/rust/mcp_parser
 PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo test
 ```
 
