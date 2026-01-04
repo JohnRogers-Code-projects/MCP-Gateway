@@ -79,8 +79,31 @@ This demo intentionally enforces the following constraints:
 - No plugin or extension mechanisms
 - No attempt to scale or generalize beyond the demo
 
-These constraints are deliberate.  
+These constraints are deliberate.
 They exist to make **reasoning, boundaries, and failure modes obvious**, not to maximize flexibility.
+
+---
+
+## Trust Model
+
+**This gateway assumes all incoming requests originate from trusted clients.**
+
+There is no authentication, authorization, or rate limiting. Any client that can reach the `/mcp` endpoint can invoke any registered tool with arbitrary arguments.
+
+This is acceptable for:
+- Local development
+- Internal service-to-service communication within a trusted network
+- Demonstration and learning purposes
+
+**Production deployment would require:**
+- Transport security (TLS)
+- Client authentication (API keys, OAuth 2.0, mTLS)
+- Per-tool authorization policies
+- Input validation and sanitization at the gateway boundary
+- Rate limiting and abuse prevention
+- Audit logging of tool invocations
+
+These concerns are intentionally deferred. The goal of this repository is to demonstrate context mediation patterns, not to provide a production-ready security model.
 
 ---
 
