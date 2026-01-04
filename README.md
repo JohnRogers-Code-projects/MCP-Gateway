@@ -10,7 +10,7 @@ I built MCP-Gateway to explore what it would take to externalize tool execution,
 
 ## System Context
 
-This repository implements the MCP-Gateway used by ForgeBreaker and LarderLab to expose domain tools to LLMs via a shared interface.
+This repository implements MCP-Gateway, designed as shared infrastructure. It is currently not integrated with ForgeBreaker or LarderLab.
 Despite the repository name, this service is active infrastructure within the system described here:
 https://github.com/JohnRogers-Code-projects/JohnRogers
 
