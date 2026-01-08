@@ -16,6 +16,7 @@ from typing import Any, Literal, TypedDict
 from pydantic import BaseModel, Field
 
 from .config import MCP_PROTOCOL_VERSION, SERVER_NAME, SERVER_VERSION
+from .errors import ContractViolation, TransportFailure
 
 
 
@@ -235,13 +236,13 @@ def make_success_response(request_id: int | str, result: Any) -> JsonRpcResponse
 # -----------------------------------------------------------------------------
 
 
-class ContextError(Exception):
+class ContextError(ContractViolation):
     """Raised when context invariants are violated."""
 
     pass
 
 
-class ToolValidationError(Exception):
+class ToolValidationError(ContractViolation):
     """
     Raised when tool invocation fails validation.
 
@@ -260,7 +261,7 @@ class ToolValidationError(Exception):
         super().__init__(f"Tool '{tool_name}' validation failed: {'; '.join(errors)}")
 
 
-class ToolTimeoutError(Exception):
+class ToolTimeoutError(TransportFailure):
     """
     Raised when tool execution exceeds allowed time.
 

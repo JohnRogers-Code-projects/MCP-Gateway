@@ -14,6 +14,7 @@ All MCP clients MUST use POST /mcp with JSON-RPC 2.0 messages.
 Other endpoints (/health, /tools) exist for debugging only.
 """
 
+import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -83,7 +84,8 @@ async def mcp_endpoint(request: Request) -> JSONResponse:
     # Parse raw JSON to handle malformed requests gracefully
     try:
         body = await request.json()
-    except Exception:
+    except json.JSONDecodeError:
+        # ContractViolation: Request body is not valid JSON
         error = make_error_response(None, ErrorCode.PARSE_ERROR, "Invalid JSON")
         return JSONResponse(content=error.model_dump(), status_code=200)
 
@@ -91,6 +93,7 @@ async def mcp_endpoint(request: Request) -> JSONResponse:
     try:
         rpc_request = JsonRpcRequest(**body)
     except ValidationError as e:
+        # ContractViolation: Request does not conform to JSON-RPC schema
         error = make_error_response(
             body.get("id") if isinstance(body, dict) else None,
             ErrorCode.INVALID_REQUEST,

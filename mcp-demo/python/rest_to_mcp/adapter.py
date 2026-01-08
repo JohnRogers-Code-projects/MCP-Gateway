@@ -16,6 +16,7 @@ import json
 from typing import Any
 
 import httpx
+from pydantic import ValidationError as PydanticValidationError
 
 from .config import (
     HTTP_ERROR_THRESHOLD,
@@ -28,6 +29,7 @@ from .endpoints import (
     HttpMethod,
     RestEndpoint,
 )
+from .errors import ContractViolation, TransportFailure
 from .models import (
     ContentBlock,
     ContextError,
@@ -165,7 +167,10 @@ class RestToMcpAdapter:
             raise ToolTimeoutError(name, HTTP_TIMEOUT_SECONDS)
 
         except httpx.HTTPError as e:
-            # OTHER HTTP ERRORS: Connection refused, DNS failure, etc.
+            # TransportFailure: Connection refused, DNS failure, TLS errors, etc.
+            # Per docs/FAILURE_MODEL.md: Returns ToolCallResult with isError=true
+            # TODO: Consider whether this should raise TransportFailure instead
+            # of returning a result. Current behavior is per documented MCP representation.
             return ToolCallResult(
                 content=[TextContent(text=f"HTTP error: {e!s}")],
                 isError=True,
@@ -284,7 +289,8 @@ class RestToMcpAdapter:
 
         try:
             params = ToolCallParams(**request.params)
-        except Exception as e:
+        except PydanticValidationError as e:
+            # ContractViolation: Request params do not match expected schema
             response = make_error_response(
                 request.id,
                 ErrorCode.INVALID_PARAMS,
