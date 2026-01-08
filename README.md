@@ -18,6 +18,14 @@ MCP-Gateway is responsible only for tool registration, discovery, invocation, an
 
 ---
 
+## Reference MCP Server
+
+The [`reference_mcp_server/`](reference_mcp_server/) directory contains a minimal MCP server following the ContextForge workshop patterns. It demonstrates the simplest correct implementation using FastMCP.
+
+This exists separately from the gateway to show the baseline pattern before adding context mediation concepts.
+
+---
+
 ## Purpose
 
 Modern AI systems often rely on:
