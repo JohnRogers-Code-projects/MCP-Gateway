@@ -85,3 +85,15 @@ class ConfigurationError(GatewayFailure):
     """
 
     failure_category = "configuration_error"
+
+
+class GatewayInternalFailure(GatewayFailure):
+    """
+    An unexpected internal error occurred within the gateway.
+
+    Used at the gateway boundary to wrap raw exceptions that are not
+    already GatewayFailure instances. Preserves the original exception
+    as the cause.
+    """
+
+    failure_category = "internal_failure"

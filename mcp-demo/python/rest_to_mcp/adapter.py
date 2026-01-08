@@ -29,7 +29,7 @@ from .endpoints import (
     HttpMethod,
     RestEndpoint,
 )
-from .errors import ContractViolation, TransportFailure
+from .errors import ContractViolation, GatewayFailure, GatewayInternalFailure, TransportFailure
 from .models import (
     ContentBlock,
     ContextError,
@@ -238,33 +238,43 @@ class RestToMcpAdapter:
 
         Context is ALWAYS sealed before return. Callers receive immutable context.
         """
-        # Create canonical context at entry point (single creation path)
-        context = ExecutionContext.from_request(request)
+        # ---------------------------------------------------------------------
+        # GATEWAY BOUNDARY: No raw exception may escape this method.
+        # All exceptions must be GatewayFailure instances.
+        # ---------------------------------------------------------------------
+        try:
+            # Create canonical context at entry point (single creation path)
+            context = ExecutionContext.from_request(request)
 
-        match request.method:
-            case "initialize":
-                response = make_success_response(
-                    request.id,
-                    InitializeResult().model_dump(),
-                )
-                return response, context.seal()
+            match request.method:
+                case "initialize":
+                    response = make_success_response(
+                        request.id,
+                        InitializeResult().model_dump(),
+                    )
+                    return response, context.seal()
 
-            case "tools/list":
-                list_result = ListToolsResult(tools=self.list_tools())
-                response = make_success_response(request.id, list_result.model_dump())
-                return response, context.seal()
+                case "tools/list":
+                    list_result = ListToolsResult(tools=self.list_tools())
+                    response = make_success_response(request.id, list_result.model_dump())
+                    return response, context.seal()
 
-            case "tools/call":
-                response, context = await self._handle_tools_call(request, context)
-                return response, context.seal()
+                case "tools/call":
+                    response, context = await self._handle_tools_call(request, context)
+                    return response, context.seal()
 
-            case _:
-                response = make_error_response(
-                    request.id,
-                    ErrorCode.METHOD_NOT_FOUND,
-                    f"Unknown method: {request.method}",
-                )
-                return response, context.seal()
+                case _:
+                    response = make_error_response(
+                        request.id,
+                        ErrorCode.METHOD_NOT_FOUND,
+                        f"Unknown method: {request.method}",
+                    )
+                    return response, context.seal()
+
+        except GatewayFailure:
+            raise
+        except Exception as e:
+            raise GatewayInternalFailure(str(e), cause=e) from e
 
     async def _handle_tools_call(
         self, request: JsonRpcRequest, context: ExecutionContext
