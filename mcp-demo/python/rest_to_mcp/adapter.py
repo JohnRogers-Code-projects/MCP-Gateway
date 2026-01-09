@@ -13,7 +13,8 @@ The adapter:
 from __future__ import annotations
 
 import json
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Mapping
 
 import httpx
 from pydantic import ValidationError as PydanticValidationError
@@ -84,15 +85,22 @@ class RestToMcpAdapter:
 
     def __init__(self, base_url: str, endpoints: list[RestEndpoint] | None = None):
         self.base_url = base_url.rstrip("/")
-        self.endpoints: dict[str, RestEndpoint] = {}
         self._client: httpx.AsyncClient | None = None
 
+        # Build registry during initialization
+        registry: dict[str, RestEndpoint] = {}
         for endpoint in endpoints or []:
-            self.register_endpoint(endpoint)
+            registry[endpoint.name] = endpoint
 
-    def register_endpoint(self, endpoint: RestEndpoint) -> None:
-        """Register a REST endpoint as an MCP tool."""
-        self.endpoints[endpoint.name] = endpoint
+        # FREEZE: Registry is immutable after construction.
+        # MappingProxyType provides a read-only view; mutation raises TypeError.
+        # There is no unfreeze. There is no runtime toggle. Structure enforces policy.
+        self._endpoints: Mapping[str, RestEndpoint] = MappingProxyType(registry)
+
+    @property
+    def endpoints(self) -> Mapping[str, RestEndpoint]:
+        """Read-only access to the frozen tool registry."""
+        return self._endpoints
 
     @property
     def client(self) -> httpx.AsyncClient:
