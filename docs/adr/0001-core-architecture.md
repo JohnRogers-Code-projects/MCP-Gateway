@@ -67,7 +67,7 @@ Tools are registered at startup and do not change during runtime.
 
 **Rationale:** Runtime tool mutation creates configuration drift and makes behavior non-deterministic.
 
-> **Note:** This is currently a design intent, not a mechanical enforcement. See Issue #24.
+**Enforcement:** The tool registry is wrapped in `MappingProxyType` after construction. Mutation attempts raise `TypeError`. The `register_endpoint()` method has been removed.
 
 ---
 
@@ -165,7 +165,13 @@ The adapter is explicitly FORBIDDEN from:
 Compliance with this ADR is verified by:
 
 1. Code review against prohibited behaviors
-2. Tests that assert invariant violations fail
+2. Tests that assert invariant violations fail (see `tests/test_invariants.py`)
 3. Absence of alternative request paths
+4. Structural enforcement in code (see `docs/INVARIANTS.md`)
 
-> **Note:** Automated enforcement is not yet implemented. See Issues #4, #5, #7.
+**Enforcement status:**
+- Issue #20 (Failure authority): Enforced
+- Issue #21 (Ambiguity hard-fail): Enforced
+- Issue #22 (Validation authority): Enforced
+- Issue #23 (Execution authority): Enforced
+- Issue #24 (Tool immutability): Enforced
