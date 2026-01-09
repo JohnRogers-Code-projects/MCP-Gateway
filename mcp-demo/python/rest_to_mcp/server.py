@@ -25,7 +25,13 @@ from pydantic import ValidationError
 
 from .adapter import RestToMcpAdapter, create_multi_api_adapter
 from .dashboard import get_static_files, router as dashboard_router, set_adapter
-from .models import ErrorCode, JsonRpcRequest, make_error_response
+from .models import (
+    ErrorCode,
+    JsonRpcErrorResponse,
+    JsonRpcRequest,
+    JsonRpcResponse,
+    make_error_response,
+)
 
 # -----------------------------------------------------------------------------
 # Application Lifecycle
@@ -103,8 +109,34 @@ async def mcp_endpoint(request: Request) -> JSONResponse:
 
     # Handle the request (returns response + context for traceability)
     response, _context = await adapter.handle_request(rpc_request)
-    # Note: context is available here for logging/debugging if needed
-    return JSONResponse(content=response.model_dump(), status_code=200)
+
+    # -------------------------------------------------------------------------
+    # MCP EGRESS VALIDATION: Validate response before emission
+    # Response must conform to JSON-RPC 2.0 schema with no extra fields
+    # -------------------------------------------------------------------------
+    response_dict = response.model_dump()
+    try:
+        if isinstance(response, JsonRpcResponse):
+            JsonRpcResponse.model_validate(response_dict)
+        elif isinstance(response, JsonRpcErrorResponse):
+            JsonRpcErrorResponse.model_validate(response_dict)
+        else:
+            # TODO: UNDECIDED - unknown response type at egress
+            # This should not happen with current code paths
+            raise ValidationError.from_exception_data(
+                "Unknown response type",
+                [{"type": "value_error", "loc": ("response",), "msg": "Invalid response type"}],
+            )
+    except ValidationError as e:
+        # Egress validation failure - emit error response instead
+        error = make_error_response(
+            rpc_request.id,
+            ErrorCode.INTERNAL_ERROR,
+            f"MCP egress validation failed: {e}",
+        )
+        return JSONResponse(content=error.model_dump(), status_code=200)
+
+    return JSONResponse(content=response_dict, status_code=200)
 
 
 @app.get("/health")

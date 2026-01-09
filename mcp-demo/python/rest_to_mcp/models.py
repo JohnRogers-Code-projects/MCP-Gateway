@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal, TypedDict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .config import MCP_PROTOCOL_VERSION, SERVER_NAME, SERVER_VERSION
 from .errors import ContractViolation, TransportFailure
@@ -79,6 +79,9 @@ class JsonRpcRequest(BaseModel):
     resource fetch, and prompt request is wrapped in this format.
     """
 
+    # MCP STRICT VALIDATION: Unknown fields are rejected
+    model_config = ConfigDict(extra="forbid")
+
     jsonrpc: Literal["2.0"] = "2.0"
     id: int | str
     method: str
@@ -88,6 +91,9 @@ class JsonRpcRequest(BaseModel):
 class JsonRpcResponse(BaseModel):
     """JSON-RPC 2.0 success response."""
 
+    # MCP STRICT VALIDATION: Unknown fields are rejected
+    model_config = ConfigDict(extra="forbid")
+
     jsonrpc: Literal["2.0"] = "2.0"
     id: int | str
     result: Any
@@ -96,6 +102,9 @@ class JsonRpcResponse(BaseModel):
 class JsonRpcErrorData(BaseModel):
     """Structured error information."""
 
+    # MCP STRICT VALIDATION: Unknown fields are rejected
+    model_config = ConfigDict(extra="forbid")
+
     code: int
     message: str
     data: Any | None = None
@@ -103,6 +112,9 @@ class JsonRpcErrorData(BaseModel):
 
 class JsonRpcErrorResponse(BaseModel):
     """JSON-RPC 2.0 error response."""
+
+    # MCP STRICT VALIDATION: Unknown fields are rejected
+    model_config = ConfigDict(extra="forbid")
 
     jsonrpc: Literal["2.0"] = "2.0"
     id: int | str | None
@@ -152,6 +164,9 @@ class Tool(BaseModel):
 
 class ToolCallParams(BaseModel):
     """Parameters for tools/call method."""
+
+    # MCP STRICT VALIDATION: Unknown fields are rejected
+    model_config = ConfigDict(extra="forbid")
 
     name: str
     arguments: dict[str, Any] = Field(default_factory=dict)
