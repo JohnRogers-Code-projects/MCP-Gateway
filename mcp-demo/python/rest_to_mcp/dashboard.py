@@ -298,10 +298,20 @@ async def websocket_playground(websocket: WebSocket) -> None:
             args = substitute_args(step.args_template, captures, results)
 
             # Execute the tool
-            # NOTE: The playground simulates multi-step LLM orchestration internally.
-            # External MCP clients use the golden path (POST /mcp → handle_request).
-            # Here we call tools directly because we're simulating chained calls,
-            # not acting as an MCP client.
+            #
+            # TODO: EXECUTION AUTHORITY SPLIT (Issue 4)
+            # This module directly invokes _adapter._call_tool(), bypassing the
+            # authoritative entry point (handle_request). This is intentional for
+            # demo purposes (simulating multi-step LLM orchestration) but violates
+            # the single request path principle.
+            #
+            # DECISION REQUIRED: Should playground scenarios route through handle_request
+            # with synthetic JSON-RPC requests, or is internal demo tooling exempt from
+            # the single path constraint?
+            #
+            # Current behavior: tools/list uses handle_request, but tools/call bypasses it.
+            # This inconsistency should be resolved architecturally.
+            #
             parsed_data = {}
             try:
                 if step.tool == "__tools_list__":
@@ -312,8 +322,8 @@ async def websocket_playground(websocket: WebSocket) -> None:
                     tool_result = response.result if hasattr(response, "result") else {}
                     parsed_data = tool_result
                 else:
-                    # Direct tool call for simulation (not external MCP request)
-                    tool_result = await _adapter.call_tool(step.tool, args)
+                    # Direct tool call for simulation (bypasses handle_request)
+                    tool_result = await _adapter._call_tool(step.tool, args)
                     tool_result = tool_result.model_dump() if hasattr(tool_result, "model_dump") else tool_result
 
                     # Parse the JSON from content for cross-step data flow

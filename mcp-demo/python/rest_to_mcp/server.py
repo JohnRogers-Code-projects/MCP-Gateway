@@ -150,31 +150,6 @@ async def health() -> dict[str, str]:
     return {"status": "healthy"}
 
 
-# -----------------------------------------------------------------------------
-# Debug Endpoints (NOT part of golden path)
-# -----------------------------------------------------------------------------
-
-
-@app.get("/tools")
-async def list_tools() -> dict[str, Any]:
-    """
-    DEBUG ONLY: List available tools as plain JSON.
-
-    WARNING: This endpoint bypasses the MCP protocol.
-    MCP clients MUST use POST /mcp with method="tools/list" instead.
-
-    This exists only for:
-    - Manual debugging in browser
-    - Quick verification during development
-    - Integration test setup
-
-    Do NOT use in production MCP integrations.
-    """
-    if adapter is None:
-        raise HTTPException(status_code=503, detail="Adapter not initialized")
-
-    tools = adapter.list_tools()
-    return {"tools": [t.model_dump() for t in tools]}
 
 
 # -----------------------------------------------------------------------------

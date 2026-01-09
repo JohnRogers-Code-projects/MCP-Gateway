@@ -56,7 +56,7 @@ class TestAdapterIntegration:
     @pytest.mark.asyncio
     async def test_get_posts(self, adapter):
         """Verify we can fetch posts from JSONPlaceholder."""
-        result = await adapter.call_tool("get_posts", {})
+        result = await adapter._call_tool("get_posts", {})
         
         assert not result.isError
         assert len(result.content) == 1
@@ -67,7 +67,7 @@ class TestAdapterIntegration:
     @pytest.mark.asyncio
     async def test_get_single_post(self, adapter):
         """Verify we can fetch a specific post."""
-        result = await adapter.call_tool("get_post", {"id": "1"})
+        result = await adapter._call_tool("get_post", {"id": "1"})
         
         assert not result.isError
         text = result.content[0].text
@@ -76,7 +76,7 @@ class TestAdapterIntegration:
     @pytest.mark.asyncio
     async def test_get_posts_filtered_by_user(self, adapter):
         """Verify query parameter filtering works."""
-        result = await adapter.call_tool("get_posts", {"userId": "1"})
+        result = await adapter._call_tool("get_posts", {"userId": "1"})
         
         assert not result.isError
         # All returned posts should be from user 1
@@ -86,7 +86,7 @@ class TestAdapterIntegration:
     @pytest.mark.asyncio
     async def test_get_comments_for_post(self, adapter):
         """Verify nested resource access works."""
-        result = await adapter.call_tool("get_comments", {"postId": "1"})
+        result = await adapter._call_tool("get_comments", {"postId": "1"})
         
         assert not result.isError
         text = result.content[0].text
@@ -96,7 +96,7 @@ class TestAdapterIntegration:
     @pytest.mark.asyncio
     async def test_get_users(self, adapter):
         """Verify user list endpoint works."""
-        result = await adapter.call_tool("get_users", {})
+        result = await adapter._call_tool("get_users", {})
         
         assert not result.isError
         text = result.content[0].text
@@ -106,7 +106,7 @@ class TestAdapterIntegration:
     @pytest.mark.asyncio
     async def test_create_post(self, adapter):
         """Verify POST requests work (JSONPlaceholder fakes creation)."""
-        result = await adapter.call_tool(
+        result = await adapter._call_tool(
             "create_post",
             {
                 "title": "Test Post",
@@ -124,7 +124,7 @@ class TestAdapterIntegration:
     @pytest.mark.asyncio
     async def test_update_post(self, adapter):
         """Verify PUT requests work."""
-        result = await adapter.call_tool(
+        result = await adapter._call_tool(
             "update_post",
             {
                 "id": "1",
@@ -141,7 +141,7 @@ class TestAdapterIntegration:
     @pytest.mark.asyncio
     async def test_delete_post(self, adapter):
         """Verify DELETE requests work."""
-        result = await adapter.call_tool("delete_post", {"id": "1"})
+        result = await adapter._call_tool("delete_post", {"id": "1"})
         
         # JSONPlaceholder returns empty object for deletes
         assert not result.isError
@@ -169,16 +169,6 @@ class TestServerIntegration:
         response = await client.get("/health")
         assert response.status_code == 200
         assert response.json() == {"status": "healthy"}
-
-    @pytest.mark.asyncio
-    async def test_tools_endpoint(self, client):
-        """Verify tools listing endpoint works."""
-        response = await client.get("/tools")
-        assert response.status_code == 200
-        data = response.json()
-        assert "tools" in data
-        # 8 JSONPlaceholder + 2 Open-Meteo weather tools
-        assert len(data["tools"]) == 10
 
     @pytest.mark.asyncio
     async def test_mcp_initialize(self, client):

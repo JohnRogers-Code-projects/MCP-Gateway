@@ -378,7 +378,7 @@ class TestDeliberateFailureModes:
         from rest_to_mcp.models import ToolTimeoutError
 
         with pytest.raises(ToolTimeoutError) as exc_info:
-            await timeout_adapter.call_tool("slow_endpoint", {})
+            await timeout_adapter._call_tool("slow_endpoint", {})
 
         assert exc_info.value.tool_name == "slow_endpoint"
         assert exc_info.value.timeout_seconds > 0
@@ -586,7 +586,7 @@ class TestRestToMcpAdapter:
 
     def test_list_tools(self, mock_adapter):
         adapter, _ = mock_adapter
-        tools = adapter.list_tools()
+        tools = adapter._list_tools()
         
         assert len(tools) == 3
         names = [t.name for t in tools]
@@ -597,7 +597,7 @@ class TestRestToMcpAdapter:
     @pytest.mark.asyncio
     async def test_call_tool_success(self, mock_adapter):
         adapter, transport = mock_adapter
-        result = await adapter.call_tool("get_items", {})
+        result = await adapter._call_tool("get_items", {})
         
         assert not result.isError
         assert len(result.content) == 1
@@ -606,7 +606,7 @@ class TestRestToMcpAdapter:
     @pytest.mark.asyncio
     async def test_call_tool_with_path_param(self, mock_adapter):
         adapter, transport = mock_adapter
-        result = await adapter.call_tool("get_item", {"id": "1"})
+        result = await adapter._call_tool("get_item", {"id": "1"})
         
         assert not result.isError
         # Verify the path was constructed correctly
@@ -617,14 +617,14 @@ class TestRestToMcpAdapter:
         """Unknown tool raises ContractViolation (ambiguity hard-fail)."""
         adapter, _ = mock_adapter
         with pytest.raises(ContractViolation) as exc_info:
-            await adapter.call_tool("nonexistent", {})
+            await adapter._call_tool("nonexistent", {})
 
         assert "Unknown tool" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_call_tool_http_error_response(self, mock_adapter):
         adapter, _ = mock_adapter
-        result = await adapter.call_tool("get_item", {"id": "999"})
+        result = await adapter._call_tool("get_item", {"id": "999"})
         
         # 404 responses should set isError=True
         assert result.isError
@@ -703,7 +703,7 @@ class TestRestToMcpAdapter:
 
         # call_tool with missing params does NOT raise - it just tries to execute
         # Validation is orchestration's job, not the tool's job
-        result = await adapter.call_tool("get_items", {})
+        result = await adapter._call_tool("get_items", {})
         # It succeeds because get_items has no required params
         assert not result.isError
 
@@ -802,7 +802,7 @@ class TestMultiApiSupport:
     def test_multi_api_adapter_has_all_tools(self):
         from rest_to_mcp.adapter import create_multi_api_adapter
         adapter = create_multi_api_adapter()
-        tools = adapter.list_tools()
+        tools = adapter._list_tools()
         tool_names = [t.name for t in tools]
         # JSONPlaceholder tools
         assert "get_user" in tool_names
@@ -899,7 +899,7 @@ class TestDomainAdapterIsolation:
             endpoints=MOCK_DOMAIN_ENDPOINTS,
         )
 
-        tools = adapter.list_tools()
+        tools = adapter._list_tools()
         assert len(tools) == 1
         assert tools[0].name == "mock_operation"
 

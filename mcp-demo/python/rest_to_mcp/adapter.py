@@ -110,13 +110,13 @@ class RestToMcpAdapter:
             await self._client.aclose()
             self._client = None
 
-    def list_tools(self) -> list[Tool]:
-        """Return all registered tools in MCP format."""
+    def _list_tools(self) -> list[Tool]:
+        """Return all registered tools in MCP format. Internal use only."""
         return [endpoint.to_mcp_tool() for endpoint in self.endpoints.values()]
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolCallResult:
+    async def _call_tool(self, name: str, arguments: dict[str, Any]) -> ToolCallResult:
         """
-        Execute a tool. This is a DUMB executor.
+        Execute a tool. This is a DUMB executor. Internal use only.
 
         THIS METHOD DOES NOT:
         - Validate arguments (orchestration's job)
@@ -288,7 +288,7 @@ class RestToMcpAdapter:
                     return response, context.seal()
 
                 case "tools/list":
-                    list_result = ListToolsResult(tools=self.list_tools())
+                    list_result = ListToolsResult(tools=self._list_tools())
                     response = make_success_response(request.id, list_result.model_dump())
                     return response, context.seal()
 
@@ -383,7 +383,7 @@ class RestToMcpAdapter:
         # Execute the tool (tool is dumb - just executes)
         # ---------------------------------------------------------------------
         try:
-            call_result = await self.call_tool(params.name, params.arguments)
+            call_result = await self._call_tool(params.name, params.arguments)
         except ToolTimeoutError as e:
             # DELIBERATE FAILURE: Timeout is handled explicitly
             # Context records the failure attempt (no result, but tool was called)
