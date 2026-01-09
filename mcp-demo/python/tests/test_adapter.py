@@ -13,6 +13,7 @@ import pytest
 
 from rest_to_mcp.endpoints import HttpMethod, RestEndpoint
 from rest_to_mcp.adapter import RestToMcpAdapter, JSONPLACEHOLDER_ENDPOINTS
+from rest_to_mcp.errors import ContractViolation
 from rest_to_mcp.models import JsonRpcRequest, ToolValidationError
 
 
@@ -613,11 +614,12 @@ class TestRestToMcpAdapter:
 
     @pytest.mark.asyncio
     async def test_call_tool_unknown_tool(self, mock_adapter):
+        """Unknown tool raises ContractViolation (ambiguity hard-fail)."""
         adapter, _ = mock_adapter
-        result = await adapter.call_tool("nonexistent", {})
-        
-        assert result.isError
-        assert "Unknown tool" in result.content[0].text
+        with pytest.raises(ContractViolation) as exc_info:
+            await adapter.call_tool("nonexistent", {})
+
+        assert "Unknown tool" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_call_tool_http_error_response(self, mock_adapter):

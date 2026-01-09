@@ -130,11 +130,11 @@ class RestToMcpAdapter:
         Orchestration (_handle_tools_call) decides WHAT to call.
         This method only knows HOW to call.
         """
+        # AMBIGUITY HARD-FAIL: Unknown tool is a contract violation.
+        # Per FAILURE_MODEL.md: "Unknown tool name → Fail with INVALID_PARAMS"
+        # This should never happen if orchestration validates correctly.
         if name not in self.endpoints:
-            return ToolCallResult(
-                content=[TextContent(text=f"Unknown tool: {name}")],
-                isError=True,
-            )
+            raise ContractViolation(f"Unknown tool: {name}")
 
         endpoint = self.endpoints[name]
         url = self._build_url(endpoint, arguments)
@@ -208,10 +208,18 @@ class RestToMcpAdapter:
 
     def _response_to_content(self, response: httpx.Response) -> list[ContentBlock]:
         """Convert HTTP response to MCP content blocks."""
+        # TODO: UNDECIDED per docs/FAILURE_MODEL.md (Issue #21)
+        # - Should empty upstream responses be treated as errors?
+        # - Should partial upstream responses (missing expected fields) hard-fail?
+        # - How should non-JSON upstream responses be categorized?
+        # Currently: non-JSON falls back to raw text, empty responses accepted.
+        # This is ambiguity tolerance that requires an architectural decision.
         try:
             data = response.json()
             text = json.dumps(data, indent=2)
         except json.JSONDecodeError:
+            # AMBIGUITY: Non-JSON response - treating as raw text
+            # TODO: UNDECIDED - should this raise UpstreamFailure instead?
             text = response.text
 
         return [TextContent(text=text)]
