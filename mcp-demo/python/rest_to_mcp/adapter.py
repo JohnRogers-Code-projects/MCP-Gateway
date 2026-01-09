@@ -178,10 +178,19 @@ class RestToMcpAdapter:
 
     def _build_url(self, endpoint: RestEndpoint, arguments: dict[str, Any]) -> str:
         """Build URL with path parameters substituted."""
+        # EARLY AMBIGUITY CHECK: Detect missing params BEFORE any transformation
+        # Path params are always required - cannot build URL with holes
+        if endpoint.path_params:
+            missing = [p for p in endpoint.path_params if p not in arguments]
+            if missing:
+                raise ContractViolation(
+                    f"Cannot build URL: missing required path parameter(s): {missing}"
+                )
+
+        # Only substitute after confirming all params present
         path = endpoint.path
         for param in endpoint.path_params or []:
-            if param in arguments:
-                path = path.replace(f"{{{param}}}", str(arguments[param]))
+            path = path.replace(f"{{{param}}}", str(arguments[param]))
 
         # Use endpoint-specific base_url if provided (multi-API support)
         if endpoint.base_url:
@@ -204,7 +213,23 @@ class RestToMcpAdapter:
         """Build request body from arguments."""
         if not endpoint.body_params:
             return None
-        return {k: arguments[k] for k in endpoint.body_params if k in arguments}
+
+        # EARLY AMBIGUITY CHECK: Detect missing params BEFORE transformation
+        # ❗ UNDECIDED — ambiguous behavior requires explicit architectural decision
+        # TODO: Body param handling is ambiguous:
+        # - For POST/PUT/PATCH: validate_arguments requires them, but this check
+        #   is bypassed if call_tool is invoked directly
+        # - For GET/DELETE: body params are optional per validate_arguments
+        # - Current behavior: silently skip missing params (partial body)
+        # - Alternative: fail on any missing body param
+        # This silent classification should be replaced with explicit policy.
+        missing = [k for k in endpoint.body_params if k not in arguments]
+        if missing:
+            raise ContractViolation(
+                f"Cannot build request body: missing body parameter(s): {missing}"
+            )
+
+        return {k: arguments[k] for k in endpoint.body_params}
 
     def _response_to_content(self, response: httpx.Response) -> list[ContentBlock]:
         """Convert HTTP response to MCP content blocks."""
