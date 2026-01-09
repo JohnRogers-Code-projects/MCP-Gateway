@@ -287,6 +287,47 @@ Unresolved conflicts require an explicit decision.
 
 ---
 
+## 12. Validation Authority Rule
+
+### Validation is not complete unless it is un-bypassable.
+
+Validation must be:
+- **Centralized**: Single point of enforcement, not scattered across callers
+- **Structural**: Enforced by construction or type system, not by convention
+- **Impossible to bypass**: No code path may skip validation
+
+---
+
+### Enforcement hierarchy:
+
+1. **Construction-time validation** (preferred): Invalid data cannot be instantiated
+2. **Boundary enforcement**: Centralized point that all paths must traverse
+3. **Caller-enforced validation**: NOT ACCEPTABLE as the sole mechanism
+
+If validation can be forgotten, it will be forgotten.
+
+---
+
+### Anti-patterns Claude must flag:
+
+- Validators that don't reject invalid input
+- Validation functions that callers may "forget" to call
+- Multiple validation points with inconsistent rules
+- Validation at boundaries that internal code may bypass
+- "Optional" validation that can be disabled
+
+---
+
+### Validation placement:
+
+- **Ingress**: Before any processing occurs
+- **Egress**: Before any emission to external systems
+- **Construction**: At object instantiation (preferred)
+
+Data that enters or leaves the system without validation is a contract violation.
+
+---
+
 ## Success Definition
 
 Claude is operating correctly if it is:

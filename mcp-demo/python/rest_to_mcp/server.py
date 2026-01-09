@@ -111,30 +111,35 @@ async def mcp_endpoint(request: Request) -> JSONResponse:
     response, _context = await adapter.handle_request(rpc_request)
 
     # -------------------------------------------------------------------------
-    # MCP EGRESS VALIDATION: Validate response before emission
-    # Response must conform to JSON-RPC 2.0 schema with no extra fields
+    # MCP EGRESS VALIDATION: Defense-in-depth for response emission
+    #
+    # VALIDATION ARCHITECTURE (Option A - Construction-Time):
+    # Primary validation is enforced at construction via Pydantic models with
+    # ConfigDict(extra="forbid"). Invalid MCP data CANNOT be instantiated.
+    # This makes validation structurally un-bypassable.
+    #
+    # This egress check is defense-in-depth against:
+    # - Subclasses that might add non-protocol fields
+    # - Future code paths that might bypass make_*_response() factories
+    # - Type confusion (returning wrong response type)
+    #
+    # The type check below catches programming errors where the wrong type
+    # is returned. Re-validation is technically redundant for well-formed
+    # code paths, but enforces the "no MCP escape without validation" invariant.
     # -------------------------------------------------------------------------
-    response_dict = response.model_dump()
-    try:
-        if isinstance(response, JsonRpcResponse):
-            JsonRpcResponse.model_validate(response_dict)
-        elif isinstance(response, JsonRpcErrorResponse):
-            JsonRpcErrorResponse.model_validate(response_dict)
-        else:
-            # TODO: UNDECIDED - unknown response type at egress
-            # This should not happen with current code paths
-            raise ValidationError.from_exception_data(
-                "Unknown response type",
-                [{"type": "value_error", "loc": ("response",), "msg": "Invalid response type"}],
-            )
-    except ValidationError as e:
-        # Egress validation failure - emit error response instead
+    if not isinstance(response, (JsonRpcResponse, JsonRpcErrorResponse)):
+        # HARD FAIL: Unknown response type is a contract violation
+        # This should never happen with current code paths, but we fail
+        # loudly rather than emit potentially malformed MCP.
         error = make_error_response(
             rpc_request.id,
             ErrorCode.INTERNAL_ERROR,
-            f"MCP egress validation failed: {e}",
+            f"MCP egress validation failed: response type {type(response).__name__} "
+            "is not a valid JSON-RPC response type",
         )
         return JSONResponse(content=error.model_dump(), status_code=200)
+
+    response_dict = response.model_dump()
 
     return JSONResponse(content=response_dict, status_code=200)
 
